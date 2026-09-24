@@ -109,6 +109,11 @@ export interface MinimumChangePlan {
   costBefore: number;
   costAfter: number;
   budget: number;
+  /** Effective cap the first pass optimizes against: max(stated budget, current pot cost). */
+  budgetLimit: number;
+  /** Present when the stated budget cannot close every gap: the minimum daily
+   *  spend (at these prices) that closes all closable gaps. */
+  needsBudget?: number;
   /** Gaps that remain open, with honest per-gap explanation. */
   openGaps: GapAfter[];
   /** Per-member limiting nutrient (highest requirement-per-calorie deficit). */

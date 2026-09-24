@@ -7,19 +7,21 @@
 //     sum_f (a_fn * share_m / RDA_mn) * (p_f - m_f) + s_mn = gap_mn
 //   where gap_mn is the missing FRACTION of the member's RDA, a_fn is nutrient
 //   n per gram of food f, and s_mn >= 0 absorbs whatever cannot be closed.
-//   Budget row: sum_f (price_f/1000) * (p_f - m_f) + e = budgetHeadroom.
+//   Budget row (hard cap): sum_f (price_f/1000) * (p_f - m_f) + e = headroom,
+//   with e costing 0 — leftover budget is fine, only overspend is impossible.
 //   Objective: minimize (1 + price_f/1000) * (p_f + m_f)  [small + cheap]
-//             + SLACK_PENALTY * s_mn  [close gaps first]
-//             + BUDGET_PENALTY * e    [prefer raising spend over leaving gaps].
-//   If s* > 0 for a gap after solving, the gap honestly cannot be closed.
-//   If e* > 0, the plan fits only above the stated budget — reported, not hidden.
+//             + SLACK_PENALTY * s_mn  [close gaps first].
+//   If s* > 0 for a gap after solving, the gap cannot be closed under the cap.
+//   A second pass then lifts the cap and minimizes pure spend to find the
+//   cheapest budget that closes every closable gap (needsBudget) — reported
+//   honestly, never hidden.
 //
 // Implementation: dense tableau simplex starting from the all-slack basis
 // (always primal-feasible; no Phase 1 needed), Dantzig pricing with Bland's
 // rule fallback against cycling. Problem sizes here are tiny (tens of vars,
 // ~80 rows), so plain dense simplex is the right tool.
 
-import { FOODS, foodById, NUTRIENT_ORDER } from "./data/foods";
+import { FOODS, foodById, NUTRIENT_ORDER, type FoodNutrients } from "./data/foods";
 import { NUTRIENTS } from "./data/nutrients";
 import type {
   GapAfter,
@@ -38,8 +40,9 @@ export const MAX_ADD_FRAC = 0.75; // existing foods: use can rise by up to 75%
 export const MAX_REDUCE_FRAC = 0.75; // existing foods: use can fall by up to 75%
 export const NEW_FOOD_MAX_G = 300; // a food not in the pot can be added up to 300 g
 export const SLACK_PENALTY = 1e6; // per unit of unclosed gap (fraction of RDA)
-export const BUDGET_PENALTY = 1e4; // per currency unit of budget overshoot
+export const BIG_FREE_BUDGET = 1e9; // pass-2 "unlimited" budget (finite for stable pivots)
 export const GRAM_STEP = 5; // changes are rounded to this many grams
+export const ROW_MARGIN = 0.02; // gap-target margin (frac of RDA) absorbing rounding
 export const EPS = 1e-7;
 
 export interface SolveInput {
@@ -269,6 +272,37 @@ function pivot(T: number[][], m: number, total: number, row: number, col: number
 // Minimum-change plan
 // ---------------------------------------------------------------------------
 
+/** Warn threshold (fraction of RDA) for a nutrient id. */
+function warnFracOf(nid: string): number {
+  return NUTRIENTS.find((n) => n.id === nid)?.warnFrac ?? 1;
+}
+
+interface VarDef { foodId: string; kind: "up" | "down"; bound: number; pricePerG: number }
+
+/** Number of gap rows whose slack stayed positive (gap not closable). */
+function openGapCount(
+  lp: LPResult,
+  nVars: number,
+  slackKinds: { memberId: string; nutrientId: string }[],
+): number {
+  if (lp.status !== "optimal") return slackKinds.length;
+  let n = 0;
+  for (let r = 0; r < slackKinds.length; r++) {
+    if ((lp.x[nVars + r] ?? 0) > 5e-3) n++;
+  }
+  return n;
+}
+
+/** Net spend (currency/day) implied by the LP solution's change vars. */
+function planSpend(lp: LPResult, vars: VarDef[]): number {
+  let s = 0;
+  for (let i = 0; i < vars.length; i++) {
+    const val = lp.x[i] ?? 0;
+    if (val > EPS) s += vars[i].pricePerG * (vars[i].kind === "up" ? val : -val);
+  }
+  return s;
+}
+
 export function solve(input: SolveInput): PlanResult {
   const { household, prices } = input;
   const pot = input.pot.map((l) => ({ ...l }));
@@ -281,107 +315,148 @@ export function solve(input: SolveInput): PlanResult {
   const perKg = new Map(prices.map((p) => [p.foodId, p.pricePerKg]));
   const costBefore = potCost(pot, prices);
 
-  // Effective budget: never force the plan below what the family already
-  // spends (that would make the LP infeasible for accounting reasons); the UI
-  // surfaces "current pot already exceeds budget" separately. A small buffer
-  // absorbs gram-rounding so the stated budget is never breached.
+  // Hard cap: never force the plan below what the family already spends (the
+  // solver can only change foods, not defund the pot); the UI surfaces "the
+  // current pot exceeds the budget" separately. A small buffer absorbs gram
+  // rounding so the plan never breaches the cap.
   const ROUNDING_BUFFER = 2;
-  const budget = Math.max(household.dailyBudget, costBefore) + 1e-6;
-  const headroom = Math.max(0, budget - costBefore - ROUNDING_BUFFER);
+  const budgetLimit = Math.max(household.dailyBudget, costBefore) + ROUNDING_BUFFER;
+  const headroom = Math.max(0, budgetLimit - costBefore);
 
   // ---- Build LP ----
-  // Structural vars: [p_f..., m_f...] for foods where the bound is nonzero.
+  // Change vars: [p_f..., m_f...] for foods where the bound is nonzero.
   interface VarDef { foodId: string; kind: "up" | "down"; bound: number; pricePerG: number }
-  const vars: VarDef[] = [];
+  const changeVars: VarDef[] = [];
   for (const food of FOODS) {
     const price = (perKg.get(food.id) ?? 0) / 1000;
     const curG = cur.get(food.id) ?? 0;
     const upBound = curG > 0 ? curG * addFrac : NEW_FOOD_MAX_G;
-    if (upBound > EPS) vars.push({ foodId: food.id, kind: "up", bound: upBound, pricePerG: price });
+    if (upBound > EPS) changeVars.push({ foodId: food.id, kind: "up", bound: upBound, pricePerG: price });
     const downBound = curG > 0 ? curG * reduceFrac : 0;
-    if (downBound > EPS) vars.push({ foodId: food.id, kind: "down", bound: downBound, pricePerG: price });
+    if (downBound > EPS) changeVars.push({ foodId: food.id, kind: "down", bound: downBound, pricePerG: price });
   }
-  const varIndex = new Map<string, number>();
-  vars.forEach((v, i) => varIndex.set(`${v.foodId}:${v.kind}`, i));
-  const nVars = vars.length;
+  const nChange = changeVars.length;
 
-  // Cost vector.
-  const c = vars.map((v) => 1 + v.pricePerG); // grams changed, cheap preferred
-
-  // Rows.
-  const rows: number[][] = [];
-  const b: number[] = [];
-  const slackKinds: { memberId: string; nutrientId: string }[] = [];
-  const rowKind: ("gap" | "budget")[] = [];
-
-  // Gap rows (fraction-of-RDA units).
+  // Gap rows (fraction-of-RDA units), built first so each gets a surplus var.
   const rdaOf = new Map<string, number>();
   for (const m of household.members) {
     for (const r of m.requirements) rdaOf.set(`${m.id}:${r.nutrientId}`, r.rda);
   }
+  const gapRows: { memberId: string; nutrientId: string; gapFrac: number }[] = [];
   for (const member of household.members) {
     for (const n of NUTRIENT_ORDER) {
       const nid = n.id;
       const rda = rdaOf.get(`${member.id}:${nid}`) ?? 0;
       if (rda <= 0) continue;
+      // The solver closes gaps down to the same warn threshold the UI uses,
+      // so "plan leaves this gap open" always matches what the UI shows.
+      // A tiny margin (2% of RDA) absorbs gram-rounding so the rounded plan
+      // still clears the threshold.
+      const target = Math.min(1, warnFracOf(nid)) + ROW_MARGIN;
       const got = (potTotals[nid] ?? 0) * member.potShare;
-      const gapFrac = (rda - got) / rda;
-      if (gapFrac <= 1e-4) continue; // already met
-      const row = new Array<number>(nVars).fill(0);
-      for (let i = 0; i < nVars; i++) {
-        const v = vars[i];
-        const food = foodById(v.foodId)!;
-        const a = food.per100g[nid] / 100; // nutrient per gram
-        const coef = (a * member.potShare) / rda; // RDA-fraction per gram
-        row[i] = v.kind === "up" ? coef : -coef;
-      }
-      rows.push(row);
-      b.push(gapFrac);
-      slackKinds.push({ memberId: member.id, nutrientId: nid });
-      rowKind.push("gap");
+      const gapFrac = Math.max(0, target - got / rda);
+      if (gapFrac <= 1e-4) continue; // already at/above the threshold
+      gapRows.push({ memberId: member.id, nutrientId: nid, gapFrac });
     }
   }
 
+  // Full structural var list: change vars, then one unbounded surplus per gap
+  // row (rows read Σ coef·x − surplus + shortfall = gapFrac, i.e. close AT
+  // LEAST the gap — one member overshooting a shared dish must never make
+  // another member's row infeasible). Surplus is free: overshoot is fine.
+  const vars: VarDef[] = [
+    ...changeVars,
+    ...gapRows.map(() => ({ foodId: "", kind: "up" as const, bound: Infinity, pricePerG: 0 })),
+  ];
+  const nVars = vars.length;
+
+  // Cost vector: change grams, cheap foods preferred; surplus is free.
+  // Leftover budget is NOT penalized — the budget row is a hard cap, not a target.
+  const c = vars.map((v, i) => (i < nChange ? 1 + v.pricePerG : 0));
+
+  // Rows.
+  const rows: number[][] = [];
+  const b: number[] = [];
+  const slackKinds: { memberId: string; nutrientId: string }[] = [];
+  const rowKind: ("gap" | "bound" | "budget")[] = [];
+
+  for (const g of gapRows) {
+    const member = household.members.find((m) => m.id === g.memberId)!;
+    const rda = rdaOf.get(`${g.memberId}:${g.nutrientId}`)!;
+    const row = new Array<number>(nVars).fill(0);
+    for (let i = 0; i < nChange; i++) {
+      const v = changeVars[i];
+      const food = foodById(v.foodId)!;
+      const a = food.per100g[g.nutrientId as keyof FoodNutrients] / 100; // nutrient per gram
+      const coef = (a * member.potShare) / rda; // RDA-fraction per gram
+      row[i] = v.kind === "up" ? coef : -coef;
+    }
+    // − surplus for this row: overshooting the requirement is allowed.
+    row[nChange + slackKinds.length] = -1;
+    rows.push(row);
+    b.push(g.gapFrac);
+    slackKinds.push({ memberId: g.memberId, nutrientId: g.nutrientId });
+    rowKind.push("gap");
+  }
+
   // Bound rows: p_f <= upBound, m_f <= downBound (each with a zero-cost slack).
-  for (let i = 0; i < nVars; i++) {
+  // Surplus vars are unbounded — no bound row for them.
+  for (let i = 0; i < nChange; i++) {
     const row = new Array<number>(nVars).fill(0);
     row[i] = 1;
     rows.push(row);
-    b.push(vars[i].bound);
+    b.push(changeVars[i].bound);
     rowKind.push("bound");
   }
 
   // Budget row (currency units): sum price_g*(p - m) + e = headroom.
   {
     const row = new Array<number>(nVars).fill(0);
-    for (let i = 0; i < nVars; i++) {
-      row[i] = vars[i].kind === "up" ? vars[i].pricePerG : -vars[i].pricePerG;
+    for (let i = 0; i < nChange; i++) {
+      row[i] = changeVars[i].kind === "up" ? changeVars[i].pricePerG : -changeVars[i].pricePerG;
     }
     rows.push(row);
     b.push(headroom);
     rowKind.push("budget");
   }
 
-  // Slack cost vector (gap slacks = SLACK_PENALTY, budget excess =
-  // BUDGET_PENALTY, bound slacks = 0).
+  // Slack cost vector: gap slacks = SLACK_PENALTY (close gaps first); all
+  // other slacks (bound rows, budget leftover) cost 0.
   const cFull = [...c];
   for (let i = 0; i < rows.length; i++) {
-    cFull.push(
-      rowKind[i] === "gap"
-        ? SLACK_PENALTY
-        : rowKind[i] === "budget"
-          ? BUDGET_PENALTY
-          : 0,
-    );
+    cFull.push(rowKind[i] === "gap" ? SLACK_PENALTY : 0);
   }
 
   const lp = simplex(nVars, rows, b, cFull);
 
+  // ---- Second pass: if gaps remain under the cap, find the cheapest budget
+  // ---- that closes every closable gap (min spend, unlimited cap).
+  let needsBudget: number | undefined;
+  const openCount = openGapCount(lp, nVars, slackKinds);
+  if (openCount > 0) {
+    const rows2 = rows.map((row) => row.slice());
+    const b2 = b.slice();
+    b2[rows.length - 1] = BIG_FREE_BUDGET; // lift the cap on the budget row
+    // Objective: minimize pure spend (surplus and leftover cost 0, gap
+    // slacks forbid leaving closable gaps open).
+    const c2 = vars.map((v, i) => (i < nChange ? v.pricePerG : 0));
+    const cFull2 = [...c2];
+    for (let i = 0; i < rows.length; i++) {
+      cFull2.push(rowKind[i] === "gap" ? SLACK_PENALTY : 0);
+    }
+    const lp2 = simplex(nVars, rows2, b2, cFull2);
+    if (lp2.status === "optimal" && openGapCount(lp2, nVars, slackKinds) === 0) {
+      needsBudget = costBefore + planSpend(lp2, changeVars);
+    }
+    // If even the lifted pass can't close some gaps, needsBudget stays
+    // undefined: food alone can't close them at ANY budget — also reported.
+  }
+
   // ---- Extract solution ----
   const delta = new Map<string, number>();
   for (const food of FOODS) delta.set(food.id, 0);
-  for (let i = 0; i < nVars; i++) {
-    const v = vars[i];
+  for (let i = 0; i < nChange; i++) {
+    const v = changeVars[i];
     const val = lp.x[i] ?? 0;
     if (val > EPS) {
       const key = v.foodId;
@@ -389,13 +464,19 @@ export function solve(input: SolveInput): PlanResult {
     }
   }
 
-  // Round to GRAM_STEP and build changes.
+  // Round to GRAM_STEP — biased in the gap-closing direction (increases round
+  // up, reductions round down) so rounding never un-closes a gap — and build
+  // changes.
+  const roundedStep = (d: number) =>
+    d >= 0
+      ? Math.ceil(d / GRAM_STEP - 1e-9) * GRAM_STEP
+      : Math.floor(d / GRAM_STEP + 1e-9) * GRAM_STEP;
   const changes: PlanChange[] = [];
   const newPot: PotLine[] = [];
   const seen = new Set<string>();
   for (const line of pot) {
     const d = delta.get(line.foodId) ?? 0;
-    const step = Math.round(d / GRAM_STEP) * GRAM_STEP;
+    const step = roundedStep(d);
     const toG = Math.max(0, line.qtyPerDayG + step);
     seen.add(line.foodId);
     newPot.push({ foodId: line.foodId, qtyPerDayG: toG });
@@ -413,7 +494,7 @@ export function solve(input: SolveInput): PlanResult {
   for (const food of FOODS) {
     if (seen.has(food.id)) continue;
     const d = delta.get(food.id) ?? 0;
-    const toG = Math.max(0, Math.round(d / GRAM_STEP) * GRAM_STEP);
+    const toG = Math.max(0, roundedStep(d));
     if (toG >= GRAM_STEP) {
       newPot.push({ foodId: food.id, qtyPerDayG: toG });
       changes.push({
@@ -427,7 +508,8 @@ export function solve(input: SolveInput): PlanResult {
   }
   const costAfter = potCost(newPot, prices);
 
-  // Open gaps: gap rows whose slack stayed positive (slack r lives at x[nVars+r]).
+  // Open gaps: gap rows come first, so the shortfall slack of gap row r lives
+  // at x[nVars + r] (nVars = total structural count incl. surplus vars).
   const openGaps: GapAfter[] = [];
   for (let r = 0; r < slackKinds.length; r++) {
     const slackVal = lp.x[nVars + r] ?? 0;
@@ -439,7 +521,6 @@ export function solve(input: SolveInput): PlanResult {
       });
     }
   }
-  const budgetExceeded = costAfter > household.dailyBudget + 0.01;
 
   // Limiting members: for each member with open gaps, the nutrient whose RDA
   // per 1000 kcal is highest (requirement-per-calorie = what averages hide).
@@ -466,6 +547,8 @@ export function solve(input: SolveInput): PlanResult {
     costBefore,
     costAfter,
     budget: household.dailyBudget,
+    budgetLimit,
+    needsBudget,
     openGaps,
     limitingMembers,
     meta: {
@@ -474,7 +557,6 @@ export function solve(input: SolveInput): PlanResult {
       iterations: lp.iterations,
     },
   };
-  void budgetExceeded; // surfaced via costAfter vs budget in the UI
 
   return {
     household,
