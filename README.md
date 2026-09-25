@@ -110,10 +110,14 @@ medical advice**.
 
 ## Scope notes
 
-- 3 demo households (Sharma / Khan / Rao) cover the interesting cases: a
-  pregnant mother, a lactating mother, and teenage girls whose iron need per
-  calorie is the binding constraint the household average hides.
+- Every household is real and user-built: add any number of members (15
+  age/sex groups), set each one's share of the pot, edit the pot, the daily
+  budget and per-kg market prices. Requirements update automatically from each
+  member's group.
+- Everything is saved per-account (Convex) and recalculates live on every
+  edit — the plan, gaps and costs update as you type.
 - The plan rounds changes to 5 g, biased in the gap-closing direction so
   rounding never un-closes a gap.
 - If the stated budget can't close every gap, the plan still reports the
   cheapest complete fix (`needsBudget`) and names the limiting member.
+- Sign-in is email OTP or one-click guest; data is private to the account.

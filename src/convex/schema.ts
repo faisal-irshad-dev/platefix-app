@@ -2,6 +2,23 @@ import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { Infer, v } from "convex/values";
 
+// Shape of the saved household document (kept in sync with households.ts).
+const householdData = v.object({
+  name: v.string(),
+  currency: v.string(),
+  dailyBudget: v.number(),
+  members: v.array(
+    v.object({
+      id: v.string(),
+      name: v.string(),
+      group: v.string(),
+      potShare: v.number(),
+    }),
+  ),
+  pot: v.array(v.object({ foodId: v.string(), qtyPerDayG: v.number() })),
+  prices: v.array(v.object({ foodId: v.string(), pricePerKg: v.number() })),
+});
+
 // default user roles. can add / remove based on the project as needed
 export const ROLES = {
   ADMIN: "admin",
@@ -33,6 +50,12 @@ const schema = defineSchema(
     }).index("email", ["email"]), // index for the email. do not remove or modify
 
     // add other tables here
+
+    // One saved PlateFix household per user (members, pot, prices, budget).
+    households: defineTable({
+      userId: v.id("users"),
+      data: householdData,
+    }).index("by_user", ["userId"]),
 
     // tableName: defineTable({
     //   ...

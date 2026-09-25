@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Link } from "react-router";
+import logo from "@/assets/logo.svg";
 
 const fadeUp = {
   initial: { opacity: 0, y: 24 },
@@ -48,10 +49,10 @@ export default function Landing() {
       {/* Nav */}
       <header className="sticky top-0 z-20 border-b border-border/60 bg-background/85 backdrop-blur">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-2">
-            <CookingPot className="size-6 text-primary" />
+          <Link to="/" className="flex items-center gap-2">
+            <img src={logo} alt="PlateFix logo" className="size-8 text-primary" />
             <span className="text-xl font-bold tracking-tight">PlateFix</span>
-          </div>
+          </Link>
           <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
             <a href="#problem" className="transition-colors hover:text-foreground">The problem</a>
             <a href="#how" className="transition-colors hover:text-foreground">How it works</a>
@@ -99,7 +100,7 @@ export default function Landing() {
               </Button>
             </div>
             <p className="mt-4 text-xs text-muted-foreground">
-              Browser-only · no install · built for families on tight budgets
+              Browser-only · free · built for real families on real budgets
             </p>
           </div>
 
@@ -272,8 +273,8 @@ export default function Landing() {
       <footer className="mt-auto border-t border-border/60">
         <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-3 px-4 py-6 text-xs text-muted-foreground sm:flex-row sm:px-6">
           <p className="flex items-center gap-1.5">
-            <CookingPot className="size-3.5" />
-            PlateFix — a EurekaDev prototype. Not medical advice.
+            <img src={logo} alt="" className="size-4 text-primary" />
+            PlateFix. Not medical advice.
           </p>
           <p>
             Data: ICMR-NIN IFCT 2017 · ICMR-NIN RDA 2020 · dated local market snapshot

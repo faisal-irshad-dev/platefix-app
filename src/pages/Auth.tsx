@@ -16,7 +16,7 @@ import {
 
 import { useAuth } from "@/hooks/use-auth";
 import logo from "@/assets/logo.svg";
-import { ArrowRight, Loader2, Mail, UserX } from "lucide-react";
+import { ArrowRight, CookingPot, Loader2, Mail, UserX } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
@@ -123,14 +123,17 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
               <div className="flex justify-center">
                     <img
                       src={logo}
-                      alt="Lock Icon"
+                      alt="PlateFix logo"
                       width={64}
                       height={64}
-                      className="rounded-lg mb-4 mt-4 cursor-pointer"
+                      className="mb-4 mt-4 cursor-pointer text-primary"
                       onClick={() => navigate("/")}
                     />
                   </div>
-                <CardTitle className="text-xl">Get Started</CardTitle>
+                <CardTitle className="flex items-center justify-center gap-2 text-xl">
+                  <CookingPot className="size-5 text-primary" />
+                  PlateFix
+                </CardTitle>
                 <CardDescription>
                   Enter your email to log in or sign up
                 </CardDescription>
@@ -278,15 +281,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
           )}
 
           <div className="py-4 px-6 text-xs text-center text-muted-foreground bg-muted border-t rounded-b-lg">
-            Secured by{" "}
-            <a
-              href="https://freebuff.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline hover:text-primary transition-colors"
-            >
-              freebuff.com
-            </a>
+            The smallest change that fixes the family pot
           </div>
         </Card>
         </div>

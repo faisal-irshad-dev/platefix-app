@@ -1,7 +1,23 @@
 import type { Food, FoodCategory } from "@/lib/platefix/data/foods";
 import { FOODS, foodById } from "@/lib/platefix/data/foods";
-import { NUTRIENTS } from "@/lib/platefix/data/nutrients";
-import type { MemberGapView, PlanChange, PotLine } from "@/lib/platefix/types";
+import { NUTRIENTS, requirementsFor } from "@/lib/platefix/data/nutrients";
+import type {
+  Household,
+  HouseholdMemberProfile,
+  MemberGroup,
+  MemberGapView,
+  PlanChange,
+  PotLine,
+  PriceEntry,
+} from "@/lib/platefix/types";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Baby,
   Candy,
   Carrot,
   Droplet,
@@ -21,7 +38,10 @@ import {
   Leaf,
   Milk,
   Plus,
+  Tag,
   Trash2,
+  UserPlus,
+  Users,
   Wheat,
 } from "lucide-react";
 import { motion } from "framer-motion";
@@ -305,5 +325,282 @@ export function PotEditor({
         Quantities are the whole household&apos;s grams per day, split by each member&apos;s share of the pot. Prices in {symbol}/kg feed the budget.
       </p>
     </div>
+  );
+}
+
+// ---- Household builder ---------------------------------------------------
+
+export const MEMBER_GROUP_OPTIONS: { group: MemberGroup; label: string }[] = [
+  { group: "child1-3", label: "Child · 1–3 yrs" },
+  { group: "boy4-6", label: "Boy · 4–6 yrs" },
+  { group: "girl4-6", label: "Girl · 4–6 yrs" },
+  { group: "boy7-9", label: "Boy · 7–9 yrs" },
+  { group: "girl7-9", label: "Girl · 7–9 yrs" },
+  { group: "boy10-12", label: "Boy · 10–12 yrs" },
+  { group: "girl10-12", label: "Girl · 10–12 yrs" },
+  { group: "boy13-15", label: "Boy · 13–15 yrs" },
+  { group: "girl13-15", label: "Girl · 13–15 yrs" },
+  { group: "boy16-17", label: "Boy · 16–17 yrs" },
+  { group: "girl16-17", label: "Girl · 16–17 yrs" },
+  { group: "man", label: "Adult man" },
+  { group: "woman", label: "Adult woman" },
+  { group: "pregnant", label: "Pregnant woman" },
+  { group: "lactating", label: "Lactating mother" },
+];
+
+export function groupLabel(group: string): string {
+  return MEMBER_GROUP_OPTIONS.find((g) => g.group === group)?.label ?? group;
+}
+
+export function createMember(
+  name: string,
+  group: MemberGroup,
+  potShare: number,
+): HouseholdMemberProfile {
+  return {
+    id: `m-${Date.now()}-${Math.round(Math.random() * 1e6)}`,
+    name: name.trim() || "Family member",
+    group,
+    potShare,
+    requirements: requirementsFor(group),
+  };
+}
+
+/** Assembles the live household from the builder state. */
+export function buildHousehold(
+  name: string,
+  currency: string,
+  dailyBudget: number,
+  members: { id: string; name: string; group: MemberGroup; potShare: number }[],
+): Household {
+  return {
+    id: "my-household",
+    name,
+    currency,
+    dailyBudget: Math.max(0, dailyBudget || 0),
+    members: members.map((m) => ({
+      ...m,
+      requirements: requirementsFor(m.group),
+    })),
+  };
+}
+
+export function MemberIcon({ group, className }: { group: string; className?: string }) {
+  const Icon =
+    group === "man" || group === "woman" || group === "pregnant" || group === "lactating"
+      ? Users
+      : group.startsWith("child") || group.endsWith("4-6")
+        ? Baby
+        : Users;
+  return <Icon className={className} />;
+}
+
+export function MembersEditor({
+  members,
+  onChange,
+}: {
+  members: HouseholdMemberProfile[];
+  onChange: (next: HouseholdMemberProfile[]) => void;
+}) {
+  const shareTotal = members.reduce((s, m) => s + m.potShare, 0);
+  const setMember = (id: string, patch: Partial<HouseholdMemberProfile>) =>
+    onChange(members.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+
+  const addMember = () => {
+    const remaining = Math.max(0, 1 - shareTotal);
+    const share = members.length === 0 ? 1 : Math.min(remaining > 0 ? remaining : 0.25, 0.25);
+    onChange([...members, createMember("", "woman", Math.round(share * 100) / 100)]);
+  };
+
+  return (
+    <div className="space-y-2">
+      {members.map((m, i) => (
+        <div
+          key={m.id}
+          className="flex flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-card px-3 py-2"
+        >
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+            {i + 1}
+          </span>
+          <Input
+            value={m.name}
+            onChange={(e) => setMember(m.id, { name: e.target.value })}
+            placeholder="Name"
+            className="h-8 w-32 flex-1 sm:w-40"
+            aria-label={`Name of member ${i + 1}`}
+          />
+          <Select
+            value={m.group}
+            onValueChange={(g) => setMember(m.id, { group: g as MemberGroup })}
+          >
+            <SelectTrigger
+              className="h-8 w-full sm:w-[170px]"
+              aria-label={`Age/sex group of member ${i + 1}`}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MEMBER_GROUP_OPTIONS.map((g) => (
+                <SelectItem key={g.group} value={g.group}>
+                  {g.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div
+            className="flex items-center gap-1 rounded-lg border border-border/70 px-1"
+            title="Share of the shared pot"
+          >
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6 text-muted-foreground"
+              onClick={() =>
+                setMember(m.id, { potShare: Math.max(0.05, Math.round((m.potShare - 0.05) * 100) / 100) })
+              }
+              aria-label={`Decrease pot share of member ${i + 1}`}
+            >
+              −
+            </Button>
+            <span className="w-10 text-center text-xs font-semibold tabular-nums">
+              {Math.round(m.potShare * 100)}%
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6 text-muted-foreground"
+              onClick={() =>
+                setMember(m.id, { potShare: Math.min(1, Math.round((m.potShare + 0.05) * 100) / 100) })
+              }
+              aria-label={`Increase pot share of member ${i + 1}`}
+            >
+              +
+            </Button>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 text-muted-foreground hover:text-destructive"
+            onClick={() => onChange(members.filter((x) => x.id !== m.id))}
+            aria-label={`Remove ${m.name || `member ${i + 1}`}`}
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        </div>
+      ))}
+
+      <div className="flex items-center justify-between pt-1">
+        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={addMember}>
+          <UserPlus className="size-3.5" />
+          Add member
+        </Button>
+        <p
+          className={`text-xs tabular-nums ${
+            shareTotal > 1.001 ? "font-semibold text-amber-700 dark:text-amber-400" : "text-muted-foreground"
+          }`}
+        >
+          {Math.round(shareTotal * 100)}% of the pot shared
+        </p>
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        Each member&apos;s share is how much of the shared pot they eat. Requirements update
+        automatically from their age/sex group.
+      </p>
+    </div>
+  );
+}
+
+// ---- Price editor ---------------------------------------------------------
+
+export function PricesEditor({
+  prices,
+  onChange,
+  currency,
+}: {
+  prices: PriceEntry[];
+  onChange: (next: PriceEntry[]) => void;
+  currency: string;
+}) {
+  const symbol = currency === "INR" ? "₹" : currency;
+  const setPrice = (foodId: string, v: number) =>
+    onChange(
+      prices.map((p) =>
+        p.foodId === foodId ? { ...p, pricePerKg: Math.max(0, v || 0) } : p,
+      ),
+    );
+
+  return (
+    <div className="space-y-2">
+      <div className="grid gap-2 sm:grid-cols-2">
+        {FOODS.map((f) => {
+          const entry = prices.find((p) => p.foodId === f.id);
+          return (
+            <div
+              key={f.id}
+              className="flex items-center gap-2 rounded-lg border border-border/70 bg-card px-3 py-1.5"
+            >
+              <FoodIcon category={f.category} className="size-4 shrink-0 text-primary" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-medium">{f.name}</p>
+              </div>
+              <div className="relative w-24 shrink-0">
+                <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                  {symbol}
+                </span>
+                <Input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={entry?.pricePerKg ?? 0}
+                  onChange={(e) => setPrice(f.id, Number(e.target.value))}
+                  className="h-7 pl-6 pr-6 text-right text-xs tabular-nums"
+                  aria-label={`${f.name} price per kilogram`}
+                />
+                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
+                  /kg
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        Enter what these foods cost at your local market today — the plan and budget math
+        update instantly.
+      </p>
+    </div>
+  );
+}
+
+export function PricesDialog({
+  prices,
+  onChange,
+  currency,
+}: {
+  prices: PriceEntry[];
+  onChange: (next: PriceEntry[]) => void;
+  currency: string;
+}) {
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="h-8 gap-1.5">
+          <Tag className="size-3.5" />
+          Edit prices
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Tag className="size-4 text-primary" />
+            Local market prices
+          </DialogTitle>
+          <DialogDescription>
+            Per-kilogram prices used for the budget and every cost estimate.
+          </DialogDescription>
+        </DialogHeader>
+        <PricesEditor prices={prices} onChange={onChange} currency={currency} />
+      </DialogContent>
+    </Dialog>
   );
 }
