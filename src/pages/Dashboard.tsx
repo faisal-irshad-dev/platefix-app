@@ -14,6 +14,7 @@ import {
   PlanChangeRow,
   PotEditor,
   PricesDialog,
+  StiglerCompareCard,
   buildHousehold,
   nutrientLabel,
 } from "@/components/platefix";
@@ -25,7 +26,7 @@ import type {
   PotLine,
   PriceEntry,
 } from "@/lib/platefix/types";
-import { potCost, solve } from "@/lib/platefix/engine";
+import { potCost, solve, solveStigler } from "@/lib/platefix/engine";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -153,6 +154,20 @@ export default function Dashboard() {
       return { empty: false as const, ...solve({ household, pot: state.pot, prices: state.prices }) };
     } catch (err) {
       console.error("PlateFix solve failed", err);
+      return null;
+    }
+  }, [household, state]);
+
+  // The Stigler comparison needs members + prices only (no pot), so it
+  // re-solves live from the same state whenever the household or prices change.
+  // Cheap: the same tiny LP machinery as the main solve.
+  const stigler = useMemo(() => {
+    if (!household) return null;
+    if (household.members.length === 0) return null;
+    try {
+      return solveStigler({ household, prices: state?.prices ?? [] });
+    } catch (err) {
+      console.error("Stigler solve failed", err);
       return null;
     }
   }, [household, state]);
@@ -522,6 +537,17 @@ export default function Dashboard() {
                     {(plan!.costAfter - plan!.budget).toFixed(0)} above the stated budget.
                   </p>
                 )}
+              </div>
+            )}
+
+            {stigler && (
+              <div className="mt-4">
+                <StiglerCompareCard
+                  stigler={stigler}
+                  planCost={plan?.costAfter ?? costNow}
+                  planCovered={plan?.feasible ?? false}
+                  currency={household.currency}
+                />
               </div>
             )}
           </section>

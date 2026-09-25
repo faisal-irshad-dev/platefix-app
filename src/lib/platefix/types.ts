@@ -131,6 +131,28 @@ export interface PlanResult {
   plan: MinimumChangePlan;
 }
 
+// ---------- Stigler diet (pure cost-minimization comparison) ----------
+
+/**
+ * The 1945 Stigler diet problem run live on this household's data: same foods,
+ * same per-member nutrient targets, same solver — but the objective every
+ * cost-only diet optimizer uses, minimize spend full stop. No pot anchor, no
+ * change limits, no budget cap: just the cheapest diet that meets every
+ * member's requirement. The result is mathematically perfect and, in the
+ * words of the original problem, nobody would eat it — that contrast IS the
+ * point of PlateFix's minimum-change plan.
+ */
+export interface StiglerResult {
+  /** True when every member's every nutrient target is covered by food alone. */
+  feasible: boolean;
+  /** Cheapest food basket, largest-quantity items first. Empty when infeasible. */
+  items: { foodId: string; gPerDay: number; costPerDay: number }[];
+  /** Total daily household cost of the basket, in currency. */
+  totalCostPerDay: number;
+  /** Solver diagnostics. */
+  meta: { solveMs: number; iterations: number };
+}
+
 export interface MemberGapView {
   memberId: string;
   name: string;

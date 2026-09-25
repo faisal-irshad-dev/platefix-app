@@ -15,10 +15,11 @@ import {
   potNutrients,
   simplex,
   solve,
+  solveStigler,
 } from "./engine";
-import { FOODS, foodById } from "./data/foods";
+import { FOODS, foodById, NUTRIENT_ORDER, type FoodNutrients } from "./data/foods";
 import { DEMO_HOUSEHOLDS, DEFAULT_POT, defaultPrices } from "./data/households";
-import { requirementsFor } from "./data/nutrients";
+import { NUTRIENTS, requirementsFor } from "./data/nutrients";
 import type { Household, PotLine, PriceEntry } from "./types";
 
 const prices: PriceEntry[] = defaultPrices();
@@ -289,6 +290,75 @@ describe("data hygiene", () => {
     const ids = new Set(reqs.map((r) => r.nutrientId));
     for (const n of ["energy", "protein", "iron", "calcium", "zinc", "folate", "vitA", "vitB12"]) {
       expect(ids.has(n)).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stigler diet comparison (VAL-2: why not just minimize cost?)
+// ---------------------------------------------------------------------------
+
+describe("stigler diet (cost-only optimizer)", () => {
+  test("covers every member's every nutrient target — verified, not claimed", () => {
+    for (const hh of DEMO_HOUSEHOLDS) {
+      const s = solveStigler({ household: hh, prices });
+      expect(s.feasible).toBe(true);
+
+      // Verify the ROUNDED basket against the member rows directly: for each
+      // member and nutrient, sum(food grams * per100g/100 * potShare) must
+      // reach the same warn-threshold target (+margin) the plan closes to.
+      for (const m of hh.members) {
+        for (const { id: nid } of NUTRIENT_ORDER) {
+          const rda = m.requirements.find((r) => r.nutrientId === nid)?.rda ?? 0;
+          if (rda <= 0) continue;
+          const warn = NUTRIENTS.find((n) => n.id === nid)?.warnFrac ?? 1;
+          const target = Math.min(1, warn) + 0.019; // ROW_MARGIN with slack for rounding
+          let got = 0;
+          for (const it of s.items) {
+            const food = foodById(it.foodId)!;
+            got += (food.per100g[nid as keyof FoodNutrients] / 100) * it.gPerDay * m.potShare;
+          }
+          expect(got / rda).toBeGreaterThanOrEqual(target - 1e-9);
+        }
+      }
+    }
+  });
+
+  test("total cost is at or below the minimum-change plan's cost", () => {
+    // The mathematical point of the comparison: the pure-cost optimum can
+    // never cost more than the minimum-change plan, which keeps the pot
+    // anchored and caps every change.
+    for (const hh of DEMO_HOUSEHOLDS) {
+      const s = solveStigler({ household: hh, prices });
+      const result = solve({ household: hh, pot: DEFAULT_POT, prices });
+      if (!result.plan.feasible) return; // only comparable when the plan fully closes
+      expect(s.feasible).toBe(true);
+      expect(s.totalCostPerDay).toBeLessThanOrEqual(result.plan.costAfter + 1e-6);
+    }
+  });
+
+  test("basket is sorted by quantity and every price is positive", () => {
+    const s = solveStigler({ household: DEMO_HOUSEHOLDS[0], prices });
+    expect(s.feasible).toBe(true);
+    expect(s.items.length).toBeGreaterThan(0);
+    for (let i = 1; i < s.items.length; i++) {
+      expect(s.items[i - 1].gPerDay).toBeGreaterThanOrEqual(s.items[i].gPerDay);
+    }
+    for (const it of s.items) {
+      expect(it.gPerDay).toBeGreaterThan(0);
+      expect((perKg.get(it.foodId) ?? 0)).toBeGreaterThan(0);
+      expect(it.costPerDay).toBeCloseTo((it.gPerDay / 1000) * (perKg.get(it.foodId) ?? 0), 6);
+    }
+    expect(s.totalCostPerDay).toBeCloseTo(
+      s.items.reduce((sum, it) => sum + it.costPerDay, 0),
+      6,
+    );
+  });
+
+  test("quantities are GRAM_STEP multiples (displayed basket, not raw LP output)", () => {
+    const s = solveStigler({ household: DEMO_HOUSEHOLDS[1], prices });
+    for (const it of s.items) {
+      expect(it.gPerDay % GRAM_STEP).toBe(0);
     }
   });
 });

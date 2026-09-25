@@ -9,6 +9,7 @@ import type {
   PlanChange,
   PotLine,
   PriceEntry,
+  StiglerResult,
 } from "@/lib/platefix/types";
 import {
   Dialog,
@@ -35,9 +36,11 @@ import {
   Droplet,
   Drumstick,
   Egg,
+  FlaskConical,
   Leaf,
   Milk,
   Plus,
+  Table2,
   Tag,
   Trash2,
   UserPlus,
@@ -602,5 +605,135 @@ export function PricesDialog({
         <PricesEditor prices={prices} onChange={onChange} currency={currency} />
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ---- Stigler diet comparison ----------------------------------------------
+
+/**
+ * The 1945 Stigler diet, computed live on this household's own data: same
+ * solver, same food list, same nutrient targets — objective swapped for the
+ * one every cost-only diet optimizer uses: minimize spend, full stop.
+ * Framing rule: this is what the machine recommends, never a judgment on the
+ * family. Copy stays exact, not preachy.
+ */
+export function StiglerCompareCard({
+  stigler,
+  planCost,
+  planCovered,
+  currency,
+}: {
+  stigler: StiglerResult;
+  /** PlateFix plan's daily cost, shown right next to the pure-cost answer. */
+  planCost: number;
+  /** Whether the plan closes every gap — copy stays honest when it doesn't. */
+  planCovered: boolean;
+  currency: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const symbol = currency === "INR" ? "₹" : currency;
+  const money = (v: number) => `${symbol}${v.toFixed(0)}`;
+
+  return (
+    <div className="rounded-xl border border-border/70 bg-muted/30 shadow-none">
+      <div className="flex flex-wrap items-center justify-between gap-2 p-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Table2 className="size-4 shrink-0 text-muted-foreground" />
+          <p className="text-sm font-medium">Why not just minimize cost?</p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1.5"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+        >
+          <FlaskConical className="size-3.5" />
+          {open ? "Hide the cost-only answer" : "See what a spreadsheet would tell you to eat"}
+        </Button>
+      </div>
+
+      {open && (
+        <div className="border-t border-border/70 p-4">
+          <p className="text-xs leading-5 text-muted-foreground">
+            The exact same solver, the exact same food list, the exact same nutrient
+            targets — one different instruction: minimize cost, full stop. This is the
+            1945 Stigler diet problem, the original cost-only diet optimization, recomputed
+            live on your household&apos;s data.
+          </p>
+
+          {!stigler.feasible ? (
+            <p className="mt-3 text-sm text-muted-foreground">
+              With this food list and these requirements, no basket meets every member&apos;s
+              needs — even with unlimited money. The minimum-change plan already reports
+              this honestly.
+            </p>
+          ) : (
+            <>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {/* The pure-cost answer */}
+                <div className="rounded-lg border border-border/70 bg-card p-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Cost-only optimizer says
+                  </p>
+                  <ul className="mt-2 space-y-1.5">
+                    {stigler.items.map((it) => {
+                      const food = foodById(it.foodId);
+                      return (
+                        <li key={it.foodId} className="flex items-baseline justify-between gap-2 text-sm">
+                          <span className="min-w-0 truncate font-medium">
+                            {food?.name ?? it.foodId}
+                            {food?.localName ? (
+                              <span className="ml-1 text-[11px] text-muted-foreground">{food.localName}</span>
+                            ) : null}
+                          </span>
+                          <span className="shrink-0 tabular-nums text-muted-foreground">
+                            {it.gPerDay.toLocaleString()} g/day
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p className="mt-2 border-t border-border/60 pt-2 text-sm">
+                    <span className="font-bold tabular-nums">{money(stigler.totalCostPerDay)}</span>
+                    <span className="text-muted-foreground">/day, nothing else</span>
+                  </p>
+                </div>
+
+                {/* PlateFix's answer, same frame */}
+                <div className="rounded-lg border border-primary/40 bg-primary/5 p-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">
+                    PlateFix says
+                  </p>
+                  <ul className="mt-2 space-y-1.5 text-sm">
+                    <li className="flex items-baseline justify-between gap-2">
+                      <span className="font-medium">Small changes to the food you already cook</span>
+                    </li>
+                    <li className="flex items-baseline justify-between gap-2">
+                      <span className="text-muted-foreground">Nothing new to learn, nothing wasted</span>
+                    </li>
+                  </ul>
+                  <p className="mt-2 border-t border-primary/20 pt-2 text-sm">
+                    <span className="font-bold tabular-nums text-primary">{money(planCost)}</span>
+                    <span className="text-muted-foreground">
+                      {planCovered
+                        ? "/day — the whole family, covered"
+                        : "/day — plus an honest report of what food alone can't fix"}
+                    </span>
+                  </p>
+                </div>
+              </div>
+
+              <p className="mt-3 text-xs italic leading-5 text-muted-foreground">
+                Mathematically perfect — every requirement met at the lowest possible spend.
+                And nobody would actually eat it. That&apos;s the whole point: the missing
+                ingredient in a spreadsheet was never math, it was the family.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
