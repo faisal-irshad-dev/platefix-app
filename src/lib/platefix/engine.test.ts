@@ -8,7 +8,10 @@ import {
   MAX_ADD_FRAC,
   MAX_REDUCE_FRAC,
   NEW_FOOD_MAX_G,
+  TOUCH_MIN_FRAC,
+  applyPlan,
   computeGaps,
+  hiddenMemberInsight,
   memberIntake,
   memberStatus,
   potCost,
@@ -16,6 +19,7 @@ import {
   simplex,
   solve,
   solveStigler,
+  spendTouchingNoGaps,
 } from "./engine";
 import { FOODS, foodById, NUTRIENT_ORDER, type FoodNutrients } from "./data/foods";
 import { DEMO_HOUSEHOLDS, DEFAULT_POT, defaultPrices } from "./data/households";
@@ -360,5 +364,172 @@ describe("stigler diet (cost-only optimizer)", () => {
     for (const it of s.items) {
       expect(it.gPerDay % GRAM_STEP).toBe(0);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Judge-facing insights (computed, never claimed)
+// ---------------------------------------------------------------------------
+
+describe("applyPlan", () => {
+  test("gapsAfter is recomputed from data, not copied from the solver", () => {
+    for (const hh of DEMO_HOUSEHOLDS) {
+      const result = solve({ household: hh, pot: DEFAULT_POT, prices });
+      const applied = applyPlan(hh, DEFAULT_POT, result.plan);
+      // Independent recomputation must agree with the reported member gaps.
+      expect(applied.gapsAfter).toEqual(computeGaps(hh, applied.pot));
+      // Members still short is derived from those same gaps.
+      expect(applied.membersStillShort).toEqual(
+        applied.gapsAfter
+          .filter((v) => v.gaps.length > 0)
+          .map((v) => ({ memberId: v.memberId, name: v.name, gapCount: v.gaps.length })),
+      );
+    }
+  });
+
+  test("a feasible plan drives every listed gap below its warn threshold", () => {
+    for (const hh of DEMO_HOUSEHOLDS) {
+      const result = solve({ household: hh, pot: DEFAULT_POT, prices });
+      if (!result.plan.feasible) continue;
+      const applied = applyPlan(hh, DEFAULT_POT, result.plan);
+      expect(applied.membersStillShort).toEqual([]);
+    }
+  });
+
+  test("changes are actually applied to the pot", () => {
+    const hh = DEMO_HOUSEHOLDS[0];
+    const result = solve({ household: hh, pot: DEFAULT_POT, prices });
+    const applied = applyPlan(hh, DEFAULT_POT, result.plan);
+    for (const c of result.plan.changes) {
+      const line = applied.pot.find((l) => l.foodId === c.foodId);
+      if (c.toG === 0) {
+        // removed lines disappear
+        expect(line).toBeUndefined();
+      } else {
+        expect(line?.qtyPerDayG).toBe(c.toG);
+      }
+    }
+    // Pot size is otherwise untouched.
+    expect(applied.pot.length).toBe(
+      DEFAULT_POT.length +
+        result.plan.changes.filter((c) => c.kind === "add" && c.toG > 0).length,
+    );
+  });
+
+  test("energyFracAfter matches pot energy over the household's energy RDA", () => {
+    const hh = DEMO_HOUSEHOLDS[2];
+    const result = solve({ household: hh, pot: DEFAULT_POT, prices });
+    const applied = applyPlan(hh, DEFAULT_POT, result.plan);
+    const rda = hh.members.reduce(
+      (s, m) => s + (m.requirements.find((r) => r.nutrientId === "energy")?.rda ?? 0),
+      0,
+    );
+    expect(applied.energyFracAfter).toBeCloseTo(potNutrients(applied.pot).energy / rda, 6);
+  });
+});
+
+describe("hiddenMemberInsight", () => {
+  test("the Sharma daughter (13-15) beats a man+pregnant-woman average on iron", () => {
+    // The scenario the whole product is built around: the adolescent girl's
+    // iron need per 1000 kcal is far above the household average.
+    const hh = DEMO_HOUSEHOLDS[0];
+    const insight = hiddenMemberInsight(hh, DEFAULT_POT);
+    expect(insight).not.toBeNull();
+    expect(insight!.ratio).toBeGreaterThan(1.05);
+    expect(insight!.needPer1000kcal).toBeGreaterThan(insight!.avgNeedPer1000kcal);
+  });
+
+  test("fracNow matches memberStatus for that member+nutrient", () => {
+    for (const hh of DEMO_HOUSEHOLDS) {
+      const insight = hiddenMemberInsight(hh, DEFAULT_POT);
+      if (!insight) continue;
+      const status = memberStatus(hh, DEFAULT_POT).find(
+        (s) => s.memberId === insight.memberId,
+      );
+      const row = status?.rows.find((r) => r.nutrientId === insight.nutrientId);
+      expect(row?.frac).toBeCloseTo(insight.fracNow, 9);
+    }
+  });
+
+  test("a household of identical members hides nobody (ratio ~1)", () => {
+    const hh = DEMO_HOUSEHOLDS[1];
+    const base = hh.members[1]; // two members, same age/sex group
+    const twins = {
+      ...hh,
+      members: [
+        { ...base, id: "t1", name: "Twin A", potShare: 0.5 },
+        { ...base, id: "t2", name: "Twin B", potShare: 0.5 },
+      ],
+    };
+    const insight = hiddenMemberInsight(twins, DEFAULT_POT);
+    expect(insight).not.toBeNull();
+    expect(insight!.ratio).toBeLessThan(1.01);
+  });
+
+  test("never flags energy and ignores zero-share members", () => {
+    const hh = DEMO_HOUSEHOLDS[0];
+    const insight = hiddenMemberInsight(hh, DEFAULT_POT);
+    expect(insight!.nutrientId).not.toBe("energy");
+    const zeroShare = {
+      ...hh,
+      members: [...hh.members, { ...hh.members[0], id: "ghost", name: "Ghost", potShare: 0 }],
+    };
+    const withGhost = hiddenMemberInsight(zeroShare, DEFAULT_POT);
+    expect(withGhost!.memberId).not.toBe("ghost");
+  });
+});
+
+describe("spendTouchingNoGaps", () => {
+  test("on the default pot, a meaningful share of spend touches no open gap", () => {
+    // The judge-facing story: money already in the kitchen, aimed at nothing
+    // that is short. Rice's trace iron must NOT rescue it — hence the
+    // materiality floor.
+    for (const hh of DEMO_HOUSEHOLDS) {
+      const info = spendTouchingNoGaps(hh, DEFAULT_POT, prices);
+      expect(info.totalSpend).toBeCloseTo(potCost(DEFAULT_POT, prices), 6);
+      expect(info.spendOnGapFoods + info.spendTouchingNothing).toBeCloseTo(info.totalSpend, 6);
+      expect(info.wasteFrac).toBeGreaterThan(0.05);
+      expect(info.wasteFrac).toBeLessThan(1);
+      expect(info.offenders.length).toBeGreaterThan(0);
+      // Offenders are sorted largest spend first.
+      for (let i = 1; i < info.offenders.length; i++) {
+        expect(info.offenders[i - 1].spend).toBeGreaterThanOrEqual(info.offenders[i].spend);
+      }
+    }
+  });
+
+  test("trace contributions do not count as touching (the sugar rule)", () => {
+    // Sugar: 398 kcal/100 g but only 0.1 mg iron — far below the materiality
+    // floor for any open iron gap, so it must be an offender, not a helper.
+    const hh = DEMO_HOUSEHOLDS[0];
+    const info = spendTouchingNoGaps(hh, DEFAULT_POT, prices);
+    expect(info.offenders.map((o) => o.foodId)).toContain("sugar");
+  });
+
+  test("a fully covered pot reports zero waste", () => {
+    // No open gaps -> by definition every rupee is aimed at something.
+    const hh = DEMO_HOUSEHOLDS[0];
+    const result = solve({ household: hh, pot: DEFAULT_POT, prices });
+    if (!result.plan.feasible) return; // skip if the demo can't fully close
+    const applied = applyPlan(hh, DEFAULT_POT, result.plan);
+    const info = spendTouchingNoGaps(hh, applied.pot, prices);
+    expect(info.spendTouchingNothing).toBe(0);
+    expect(info.wasteFrac).toBe(0);
+    expect(info.offenders).toEqual([]);
+  });
+
+  test("empty pot and empty household edge cases", () => {
+    const hh = DEMO_HOUSEHOLDS[0];
+    const empty = spendTouchingNoGaps(hh, [], prices);
+    expect(empty.totalSpend).toBe(0);
+    expect(empty.wasteFrac).toBe(0);
+    const nobody = spendTouchingNoGaps({ ...hh, members: [] }, DEFAULT_POT, prices);
+    // No members -> no open gaps -> nothing is waste.
+    expect(nobody.spendTouchingNothing).toBe(0);
+  });
+
+  test("TOUCH_MIN_FRAC is a strict floor, not a target", () => {
+    expect(TOUCH_MIN_FRAC).toBeGreaterThan(0);
+    expect(TOUCH_MIN_FRAC).toBeLessThan(0.1);
   });
 });

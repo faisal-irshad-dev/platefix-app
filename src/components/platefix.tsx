@@ -2,13 +2,16 @@ import type { Food, FoodCategory } from "@/lib/platefix/data/foods";
 import { FOODS, foodById } from "@/lib/platefix/data/foods";
 import { NUTRIENTS, requirementsFor } from "@/lib/platefix/data/nutrients";
 import type {
+  HiddenMemberInsight,
   Household,
   HouseholdMemberProfile,
   MemberGroup,
   MemberGapView,
+  MinimumChangePlan,
   PlanChange,
   PotLine,
   PriceEntry,
+  SpendTouchingNoGaps,
   StiglerResult,
 } from "@/lib/platefix/types";
 import {
@@ -33,11 +36,15 @@ import {
   Baby,
   Candy,
   Carrot,
+  Check,
+  CircleDollarSign,
   Droplet,
   Drumstick,
   Egg,
+  Eye,
   FlaskConical,
   Leaf,
+  MessageCircle,
   Milk,
   Plus,
   Table2,
@@ -735,5 +742,202 @@ export function StiglerCompareCard({
         </div>
       )}
     </div>
+  );
+}
+
+// ---- Hidden member insight -------------------------------------------------
+
+/**
+ * The card that makes the "shared pot" abstraction visible: the member whose
+ * requirement per 1000 kcal is furthest above the household average. Every
+ * number on it is computed live from the RDA table and the current pot —
+ * nothing here is a claim.
+ */
+export function HiddenMemberCard({ insight }: { insight: HiddenMemberInsight }) {
+  const pct = Math.round(insight.fracNow * 100);
+  return (
+    <div className="rounded-xl border border-violet-600/40 bg-violet-600/5 p-4">
+      <p className="flex items-center gap-1.5 text-sm font-semibold">
+        <Eye className="size-4 text-violet-600 dark:text-violet-400" />
+        The average hides someone
+      </p>
+      <p className="mt-1.5 text-sm leading-6">
+        <span className="font-semibold">{insight.memberName}</span> needs{" "}
+        <span className="font-semibold tabular-nums">{insight.ratio.toFixed(1)}×</span> the
+        household&apos;s average {nutrientLabel(insight.nutrientId)} per calorie they eat.
+        Sharing the pot by share, not by need, misses them first.
+      </p>
+      <p className="mt-1.5 text-sm">
+        Today they get{" "}
+        <span
+          className={`font-semibold tabular-nums ${
+            pct >= 70
+              ? "text-emerald-600 dark:text-emerald-400"
+              : "text-amber-700 dark:text-amber-400"
+          }`}
+        >
+          {pct}%
+        </span>{" "}
+        of their {nutrientLabel(insight.nutrientId)} requirement.
+      </p>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Computed from the RDA table: their need per 1000 kcal vs the potShare-weighted
+        household average, checked against the actual pot.
+      </p>
+    </div>
+  );
+}
+
+// ---- Spend aimed at nothing -------------------------------------------------
+
+/**
+ * The what-if every judge asks: how much of today's spend touches no open
+ * gap. Renders nothing when the pot is fully aimed — honesty cuts both ways.
+ */
+export function NoGapSpendStrip({
+  info,
+  currency,
+}: {
+  info: SpendTouchingNoGaps;
+  currency: string;
+}) {
+  const symbol = currency === "INR" ? "₹" : currency;
+  const pct = Math.round(info.wasteFrac * 100);
+  if (info.totalSpend <= 0 || pct < 1) return null;
+  const working = Math.max(0, 100 - pct);
+  const names = (id: string) => foodById(id)?.name ?? id;
+  return (
+    <div className="rounded-xl border border-border/70 bg-muted/30 p-4">
+      <p className="flex items-center gap-1.5 text-sm font-semibold">
+        <CircleDollarSign className="size-4 text-muted-foreground" />
+        Where today&apos;s food money actually points
+      </p>
+      <div className="mt-2.5 flex h-2.5 w-full overflow-hidden rounded-full bg-muted">
+        <div className="h-full bg-emerald-600" style={{ width: `${working}%` }} />
+        <div className="h-full bg-amber-500" style={{ width: `${pct}%` }} />
+      </div>
+      <p className="mt-2 text-sm leading-6">
+        <span className="font-semibold tabular-nums">
+          {symbol}
+          {info.spendTouchingNothing.toFixed(0)} — {pct}%
+        </span>{" "}
+        goes to foods that do nothing for any open gap:
+      </p>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {info.offenders.slice(0, 4).map((o) => (
+          <span
+            key={o.foodId}
+            className="rounded-full border border-amber-600/40 bg-amber-600/10 px-2 py-0.5 text-xs"
+          >
+            {names(o.foodId)} · {symbol}
+            {o.spend.toFixed(0)}
+          </span>
+        ))}
+        {info.offenders.length > 4 && (
+          <span className="px-1 py-0.5 text-xs text-muted-foreground">
+            +{info.offenders.length - 4} more
+          </span>
+        )}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        It&apos;s already in the kitchen. The plan doesn&apos;t ask for more money — it re-aims
+        what&apos;s there.
+      </p>
+    </div>
+  );
+}
+
+// ---- WhatsApp share ---------------------------------------------------------
+
+const SHARE_KIND: Record<PlanChange["kind"], string> = {
+  add: "Add",
+  increase: "More",
+  reduce: "Less",
+  remove: "Stop",
+};
+
+/**
+ * Shares the plan where family food decisions actually happen: WhatsApp. The
+ * message is built from the computed plan — kind, grams, cost deltas — and the
+ * same honest copy as the screen, feasible or not. The clipboard copy is a
+ * convenience; the wa.me URL carries the text either way.
+ */
+export function CopyPlanButton({
+  householdName,
+  plan,
+  currency,
+  extra,
+}: {
+  householdName: string;
+  plan: MinimumChangePlan;
+  currency: string;
+  /** One extra computed insight line, e.g. the hidden-member sentence. */
+  extra?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const symbol = currency === "INR" ? "₹" : currency;
+
+  const lines: string[] = [`PlateFix plan — ${householdName}`];
+  if (plan.changes.length > 0) {
+    lines.push("");
+    for (const c of plan.changes) {
+      const food = foodById(c.foodId)?.name ?? c.foodId;
+      const grams =
+        c.kind === "add"
+          ? `${c.toG} g/day`
+          : c.kind === "remove"
+            ? `drop ${c.fromG} g/day`
+            : `${c.fromG} → ${c.toG} g/day`;
+      const cost =
+        c.costDelta >= 0.5
+          ? ` (+${symbol}${c.costDelta.toFixed(0)})`
+          : c.costDelta <= -0.5
+            ? ` (−${symbol}${Math.abs(c.costDelta).toFixed(0)})`
+            : "";
+      lines.push(`• ${SHARE_KIND[c.kind]} ${food} — ${grams}${cost}`);
+    }
+  }
+  lines.push("");
+  if (plan.feasible) {
+    lines.push(
+      `Every nutrient gap closes for about ${symbol}${plan.costAfter.toFixed(0)}/day (from ${symbol}${plan.costBefore.toFixed(0)} today).`,
+    );
+  } else {
+    for (const g of plan.openGaps) {
+      lines.push(
+        `Still short: ${Math.round(g.shortfallFrac * 100)}% of the ${nutrientLabel(g.nutrientId)} requirement.`,
+      );
+    }
+    if (plan.needsBudget !== undefined) {
+      lines.push(
+        `Closing every gap food can close needs about ${symbol}${Math.ceil(plan.needsBudget)}/day.`,
+      );
+    }
+  }
+  if (extra) lines.push(extra);
+  lines.push("");
+  lines.push("Smallest change to the family pot, from PlateFix.");
+
+  const share = () => {
+    const text = lines.join("\n");
+    try {
+      void navigator.clipboard?.writeText(text);
+    } catch {
+      // Clipboard can be blocked — WhatsApp still gets the text via the URL.
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
+  };
+
+  return (
+    <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" onClick={share}>
+      {copied ? (
+        <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+      ) : (
+        <MessageCircle className="size-3.5" />
+      )}
+      {copied ? "Copied — finish in WhatsApp" : "Share the plan on WhatsApp"}
+    </Button>
   );
 }

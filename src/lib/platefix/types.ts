@@ -159,3 +159,50 @@ export interface MemberGapView {
   /** Nutrients below warnFrac of RDA, sorted worst first. */
   gaps: { nutrientId: string; got: number; rda: number; frac: number }[];
 }
+
+// ---------- Applied plan + judge-facing insights ----------
+
+/** The pot with the plan applied, plus solver-verified outcome numbers. */
+export interface AppliedPlan {
+  pot: PotLine[];
+  /** Per-member gap view after the plan (computed, not claimed). */
+  gapsAfter: MemberGapView[];
+  /** Members with at least one open gap after the plan. */
+  membersStillShort: { memberId: string; name: string; gapCount: number }[];
+  /** Household energy divided by the household's summed RDA energy. */
+  energyFracAfter: number;
+}
+
+/**
+ * The hidden-member insight: the member whose requirement per 1000 kcal is
+ * furthest above the household average, for any single nutrient. This is the
+ * "household averages hide the highest-need person" proof, stated as ratios
+ * from the RDA table rather than as a claim.
+ */
+export interface HiddenMemberInsight {
+  memberId: string;
+  memberName: string;
+  nutrientId: string;
+  /** Their requirement per 1000 kcal (RDA-nutrient / RDA-energy × 1000). */
+  needPer1000kcal: number;
+  /** PotShare-weighted household average of the same ratio. */
+  avgNeedPer1000kcal: number;
+  /** needPer1000kcal / avgNeedPer1000kcal — how far the average hides them. */
+  ratio: number;
+  /** Their current frac of RDA for that nutrient (from the actual pot). */
+  fracNow: number;
+}
+
+/** Result of the spend-touching-no-gaps what-if. */
+export interface SpendTouchingNoGaps {
+  /** The pot's cost minus whatever is spent on foods with zero nutrient coverage. */
+  spendOnGapFoods: number;
+  /** Total daily pot cost (same as potCost, for convenience). */
+  totalSpend: number;
+  /** Currency amount spent on foods that touch no open gap. */
+  spendTouchingNothing: number;
+  /** Fraction of spend (0..1) going to foods that touch no open gap. */
+  wasteFrac: number;
+  /** Pot lines that touch no open gap, largest spend first. */
+  offenders: { foodId: string; spend: number }[];
+}

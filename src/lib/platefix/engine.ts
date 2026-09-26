@@ -24,7 +24,9 @@
 import { FOODS, foodById, NUTRIENT_ORDER, type FoodNutrients } from "./data/foods";
 import { NUTRIENTS } from "./data/nutrients";
 import type {
+  AppliedPlan,
   GapAfter,
+  HiddenMemberInsight,
   Household,
   HouseholdMemberProfile,
   MemberGapView,
@@ -33,6 +35,7 @@ import type {
   PlanResult,
   PotLine,
   PriceEntry,
+  SpendTouchingNoGaps,
   StiglerResult,
 } from "./types";
 
@@ -667,5 +670,177 @@ export function solveStigler(input: {
     items,
     totalCostPerDay: items.reduce((s, it) => s + it.costPerDay, 0),
     meta: { solveMs: Date.now() - started, iterations: lp.iterations },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Judge-facing insights (computed, never claimed)
+// ---------------------------------------------------------------------------
+
+/**
+ * Applies a plan's changes to a pot and computes the outcome directly from
+ * the data — the same red→green numbers the UI shows, so the demo can toggle
+ * Today / After the plan without trusting the solver's self-report.
+ */
+export function applyPlan(
+  household: Household,
+  pot: PotLine[],
+  plan: MinimumChangePlan,
+): AppliedPlan {
+  const next: PotLine[] = pot.map((l) => ({ ...l }));
+  for (const c of plan.changes) {
+    const line = next.find((l) => l.foodId === c.foodId);
+    if (line) line.qtyPerDayG = c.toG;
+    else next.push({ foodId: c.foodId, qtyPerDayG: c.toG });
+  }
+  // Removed foods drop out entirely — a 0 g line is noise in the applied pot.
+  const cleaned = next.filter((l) => l.qtyPerDayG > 0);
+  const gapsAfter = computeGaps(household, cleaned);
+  const energyRda = household.members.reduce(
+    (s, m) => s + (m.requirements.find((r) => r.nutrientId === "energy")?.rda ?? 0),
+    0,
+  );
+  const energyAfter = potNutrients(cleaned).energy ?? 0;
+  return {
+    pot: cleaned,
+    gapsAfter,
+    membersStillShort: gapsAfter
+      .filter((v) => v.gaps.length > 0)
+      .map((v) => ({ memberId: v.memberId, name: v.name, gapCount: v.gaps.length })),
+    energyFracAfter: energyRda > 0 ? energyAfter / energyRda : 1,
+  };
+}
+
+/**
+ * The hidden-member insight: the member whose requirement per 1000 kcal is
+ * furthest above the potShare-weighted household average, across every
+ * nutrient. High ratio = the average hides them. `fracNow` shows where they
+ * actually sit today.
+ */
+export function hiddenMemberInsight(household: Household, pot: PotLine[]): HiddenMemberInsight | null {
+  if (household.members.length === 0) return null;
+  const shareTotal = household.members.reduce((s, m) => s + m.potShare, 0);
+  if (shareTotal <= 0) return null;
+
+  const intake = memberStatus(household, pot);
+  const fracOf = new Map<string, number>();
+  for (const s of intake) {
+    for (const r of s.rows) fracOf.set(`${s.memberId}:${r.nutrientId}`, r.frac);
+  }
+
+  let best: HiddenMemberInsight | null = null;
+  for (const n of NUTRIENT_ORDER) {
+    if (n.id === "energy") continue;
+    let weighted = 0;
+    const perMember: { member: HouseholdMemberProfile; rda: number; per1000: number }[] = [];
+    for (const m of household.members) {
+      const energy = m.requirements.find((r) => r.nutrientId === "energy")?.rda ?? 0;
+      const rda = m.requirements.find((r) => r.nutrientId === n.id)?.rda ?? 0;
+      if (energy <= 0 || rda <= 0) continue;
+      const per1000 = rda / (energy / 1000);
+      perMember.push({ member: m, rda, per1000 });
+      weighted += m.potShare * per1000;
+    }
+    const avg = weighted / shareTotal;
+    if (avg <= 0) continue;
+    for (const pm of perMember) {
+      const ratio = pm.per1000 / avg;
+      if (!best || ratio > best.ratio) {
+        best = {
+          memberId: pm.member.id,
+          memberName: pm.member.name,
+          nutrientId: n.id,
+          needPer1000kcal: pm.per1000,
+          avgNeedPer1000kcal: avg,
+          ratio,
+          fracNow: fracOf.get(`${pm.member.id}:${n.id}`) ?? 0,
+        };
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * A food only "touches" an open gap if the amount actually cooked supplies at
+ * least this fraction of the highest need at the table for that nutrient.
+ * Without a materiality floor, trace amounts (sugar's 0.1 mg of iron per 100 g)
+ * would let empty-calorie foods claim they contribute to every gap.
+ */
+export const TOUCH_MIN_FRAC = 0.02;
+
+/**
+ * The what-if every judge asks: how much of today's spend touches a nutrient
+ * that is actually short? A food touches an open gap if the amount cooked
+ * supplies at least TOUCH_MIN_FRAC of the highest member requirement of any
+ * nutrient below its warn threshold. Energy is excluded — every calorie source
+ * touches energy by definition. The leftovers are the blind spend: money
+ * already in the kitchen, aimed at nothing that is short.
+ */
+export function spendTouchingNoGaps(
+  household: Household,
+  pot: PotLine[],
+  prices: PriceEntry[],
+): SpendTouchingNoGaps {
+  const total = potCost(pot, prices);
+  const warn = new Map(NUTRIENTS.map((n) => [n.id, n.warnFrac]));
+
+  // Open gaps: any member×nutrient (energy excluded) below its warn threshold.
+  const open = new Set<string>();
+  for (const m of household.members) {
+    const intake = memberIntake(m, pot);
+    for (const r of m.requirements) {
+      if (r.nutrientId === "energy") continue;
+      const frac = r.rda > 0 ? (intake[r.nutrientId] ?? 0) / r.rda : 1;
+      if (frac < (warn.get(r.nutrientId) ?? 1)) open.add(r.nutrientId);
+    }
+  }
+
+  const perKg = new Map(prices.map((p) => [p.foodId, p.pricePerKg]));
+  if (open.size === 0) {
+    // Nothing is short — the whole spend is working by definition.
+    return {
+      spendOnGapFoods: total,
+      totalSpend: total,
+      spendTouchingNothing: 0,
+      wasteFrac: 0,
+      offenders: [],
+    };
+  }
+
+  // Highest need at the table per open nutrient: a food must materially
+  // contribute at the amount actually cooked to count as touching the gap.
+  const maxNeed = new Map<string, number>();
+  for (const nid of open) {
+    let mx = 0;
+    for (const m of household.members) {
+      const rda = m.requirements.find((r) => r.nutrientId === nid)?.rda ?? 0;
+      if (rda > mx) mx = rda;
+    }
+    maxNeed.set(nid, mx);
+  }
+
+  const offenders: SpendTouchingNoGaps["offenders"] = [];
+  let spendOnGapFoods = 0;
+  for (const l of pot) {
+    const spend = (l.qtyPerDayG / 1000) * (perKg.get(l.foodId) ?? 0);
+    const food = foodById(l.foodId);
+    const touches =
+      food != null &&
+      [...open].some((nid) => {
+        const amount = (l.qtyPerDayG / 100) * (food.per100g[nid as keyof FoodNutrients] ?? 0);
+        return amount >= TOUCH_MIN_FRAC * (maxNeed.get(nid) ?? 0);
+      });
+    if (touches) spendOnGapFoods += spend;
+    else if (spend > 0) offenders.push({ foodId: l.foodId, spend });
+  }
+  offenders.sort((a, b) => b.spend - a.spend);
+
+  return {
+    spendOnGapFoods,
+    totalSpend: total,
+    spendTouchingNothing: Math.max(0, total - spendOnGapFoods),
+    wasteFrac: total > 0 ? Math.max(0, total - spendOnGapFoods) / total : 0,
+    offenders,
   };
 }

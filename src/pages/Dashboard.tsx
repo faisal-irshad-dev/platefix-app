@@ -9,8 +9,11 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
+  CopyPlanButton,
+  HiddenMemberCard,
   MemberGapCard,
   MembersEditor,
+  NoGapSpendStrip,
   PlanChangeRow,
   PotEditor,
   PricesDialog,
@@ -18,15 +21,23 @@ import {
   buildHousehold,
   nutrientLabel,
 } from "@/components/platefix";
-import { DEFAULT_POT, defaultPrices } from "@/lib/platefix/data/households";
+import { DEFAULT_POT, DEMO_HOUSEHOLDS, defaultPrices } from "@/lib/platefix/data/households";
 import { IFCT_2017_CITATION } from "@/lib/platefix/data/foods";
 import { NIN_RDA_2020_CITATION } from "@/lib/platefix/data/nutrients";
 import type {
+  Household,
   HouseholdMemberProfile,
   PotLine,
   PriceEntry,
 } from "@/lib/platefix/types";
-import { potCost, solve, solveStigler } from "@/lib/platefix/engine";
+import {
+  applyPlan,
+  hiddenMemberInsight,
+  potCost,
+  solve,
+  solveStigler,
+  spendTouchingNoGaps,
+} from "@/lib/platefix/engine";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -36,6 +47,7 @@ import {
   LogOut,
   Save,
   Sparkles,
+  Users,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -172,6 +184,58 @@ export default function Dashboard() {
     }
   }, [household, state]);
 
+  // Today / After-the-plan toggle for the gaps column.
+  const [view, setView] = useState<"today" | "after">("today");
+
+  // The plan applied to the pot, with gaps recomputed from data — the "After"
+  // view shows these, so the payoff is verified, not claimed.
+  const applied = useMemo(() => {
+    if (!household || !state || !result || result.empty) return null;
+    try {
+      return applyPlan(household, state.pot, result.plan);
+    } catch (err) {
+      console.error("applyPlan failed", err);
+      return null;
+    }
+  }, [household, state, result]);
+
+  // The member the household average hides (highest need-per-calorie ratio).
+  const hiddenInsight = useMemo(() => {
+    if (!household || !state || household.members.length === 0) return null;
+    return hiddenMemberInsight(household, state.pot);
+  }, [household, state]);
+
+  // Share of today's spend that touches no open gap.
+  const spendInfo = useMemo(() => {
+    if (
+      !household ||
+      !state ||
+      household.members.length === 0 ||
+      state.pot.length === 0
+    )
+      return null;
+    return spendTouchingNoGaps(household, state.pot, state.prices);
+  }, [household, state]);
+
+  // Quick-start scenarios: load a demo household into the live editor.
+  const loadScenario = (hh: Household) => {
+    setState({
+      name: hh.name,
+      currency: hh.currency,
+      dailyBudget: hh.dailyBudget,
+      members: hh.members.map(({ id, name, group, potShare }) => ({
+        id,
+        name,
+        group,
+        potShare,
+        requirements: [],
+      })),
+      pot: DEFAULT_POT.map((l) => ({ ...l })),
+      prices: defaultPrices(),
+    });
+    setView("today");
+  };
+
   const handleSignOut = async () => {
     await signOut();
     navigate("/");
@@ -188,7 +252,8 @@ export default function Dashboard() {
   const symbol = currencySymbol(household.currency);
   const plan = result && !result.empty ? result.plan : undefined;
   const gapsBefore = result && !result.empty ? result.gapsBefore : [];
-  const totalGapsBefore = gapsBefore.reduce((s, m) => s + m.gaps.length, 0);
+  const gapsShown = view === "after" && applied ? applied.gapsAfter : gapsBefore;
+  const totalGapsShown = gapsShown.reduce((s, m) => s + m.gaps.length, 0);
   const costNow = potCost(state.pot, state.prices);
 
   const memberName = (id: string) =>
@@ -245,6 +310,29 @@ export default function Dashboard() {
               </span>
             )}
           </div>
+        </div>
+
+        {/* Quick-start scenarios — the 30-second demo path */}
+        <div className="mb-6 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">
+            Try a real scenario:
+          </span>
+          {DEMO_HOUSEHOLDS.map((hh) => (
+            <Button
+              key={hh.id}
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5"
+              onClick={() => loadScenario(hh)}
+            >
+              <Users className="size-3.5" />
+              {hh.name}
+              <span className="text-xs font-normal text-muted-foreground">
+                · {hh.members.length} at the table
+              </span>
+            </Button>
+          ))}
         </div>
 
         {/* Step 1 — household identity + members */}
@@ -370,18 +458,45 @@ export default function Dashboard() {
 
         {/* Results */}
         <div className="grid gap-6 lg:grid-cols-5">
-          {/* Gaps today */}
+          {/* Gaps — today vs after the plan */}
           <section className="lg:col-span-2">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-base font-semibold">The gaps today</h2>
-              {household.members.length > 0 && (
-                <Badge
-                  variant={totalGapsBefore > 0 ? "destructive" : "default"}
-                  className={`text-[10px] ${totalGapsBefore === 0 ? "bg-emerald-600 text-white" : ""}`}
-                >
-                  {totalGapsBefore > 0 ? `${totalGapsBefore} nutrient gaps` : "everyone covered"}
-                </Badge>
-              )}
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-base font-semibold">
+                {view === "after" ? "After the plan" : "The gaps today"}
+              </h2>
+              <div className="flex items-center gap-2">
+                {plan && plan.changes.length > 0 && applied && (
+                  <div
+                    className="flex rounded-lg border border-border/70 p-0.5"
+                    role="group"
+                    aria-label="Show gaps today or after the plan"
+                  >
+                    {(["today", "after"] as const).map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setView(v)}
+                        aria-pressed={view === v}
+                        className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                          view === v
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {v === "today" ? "Today" : "After the plan"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {household.members.length > 0 && (
+                  <Badge
+                    variant={totalGapsShown > 0 ? "destructive" : "default"}
+                    className={`text-[10px] ${totalGapsShown === 0 ? "bg-emerald-600 text-white" : ""}`}
+                  >
+                    {totalGapsShown > 0 ? `${totalGapsShown} nutrient gaps` : "everyone covered"}
+                  </Badge>
+                )}
+              </div>
             </div>
             {household.members.length === 0 ? (
               <Card className="border-border/70 shadow-none">
@@ -397,9 +512,24 @@ export default function Dashboard() {
               </Card>
             ) : (
               <div className="space-y-3">
-                {gapsBefore.map((m) => (
+                {gapsShown.map((m) => (
                   <MemberGapCard key={m.memberId} view={m} />
                 ))}
+                {view === "after" && applied && applied.membersStillShort.length > 0 && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    {applied.membersStillShort.map((m) => m.name).join(", ")}{" "}
+                    {applied.membersStillShort.length === 1 ? "is" : "are"} still short — food
+                    alone can&apos;t close every gap at these change limits. The honest report is
+                    on the right.
+                  </p>
+                )}
+                {view === "today" && hiddenInsight && (
+                  <HiddenMemberCard insight={hiddenInsight}
+                  />
+                )}
+                {view === "today" && spendInfo && (
+                  <NoGapSpendStrip info={spendInfo} currency={household.currency} />
+                )}
               </div>
             )}
           </section>
@@ -537,6 +667,21 @@ export default function Dashboard() {
                     {(plan!.costAfter - plan!.budget).toFixed(0)} above the stated budget.
                   </p>
                 )}
+              </div>
+            )}
+
+            {plan && plan.changes.length > 0 && (
+              <div className="mt-4">
+                <CopyPlanButton
+                  householdName={state.name}
+                  plan={plan}
+                  currency={household.currency}
+                  extra={
+                    hiddenInsight
+                      ? `${hiddenInsight.memberName} needs ${hiddenInsight.ratio.toFixed(1)}× the household's average ${nutrientLabel(hiddenInsight.nutrientId)} per calorie.`
+                      : undefined
+                  }
+                />
               </div>
             )}
 
