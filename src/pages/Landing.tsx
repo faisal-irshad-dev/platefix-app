@@ -6,6 +6,7 @@ import {
   Scale,
   ShieldAlert,
   Sparkles,
+  Table2,
   Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -201,6 +202,57 @@ export default function Landing() {
             Statistics are stated only where verified against a primary source; see the README for
             citations. Anaemia figures are pending re-verification and deliberately not shown.
           </motion.p>
+        </div>
+      </section>
+
+      {/* Why not just a tracker? — the honest comparison */}
+      <section id="compare" className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6">
+        <motion.div {...fadeUp}>
+          <p className="text-sm font-semibold uppercase tracking-wider text-primary">
+            Why not just a tracker?
+          </p>
+          <h2 className="mt-2 max-w-3xl text-3xl font-bold tracking-tight">
+            Trackers tell you what&apos;s missing. PlateFix tells you what to change.
+          </h2>
+        </motion.div>
+        <div className="mt-8 grid gap-4 md:grid-cols-3">
+          <motion.div {...fadeUp}>
+            <Card className="h-full border-border/70 shadow-none">
+              <CardContent className="p-5">
+                <Table2 className="size-5 text-muted-foreground" />
+                <h3 className="mt-3 text-base font-semibold">A tracker</h3>
+                <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
+                  &ldquo;Your daughter is 40% short on iron.&rdquo; Then silence — the hardest
+                  question, what to do about it tonight, is left to you.
+                </p>
+              </CardContent>
+            </Card>
+          </motion.div>
+          <motion.div {...fadeUp} transition={{ delay: 0.08 }}>
+            <Card className="h-full border-border/70 shadow-none">
+              <CardContent className="p-5">
+                <Scale className="size-5 text-muted-foreground" />
+                <h3 className="mt-3 text-base font-semibold">A cost optimizer</h3>
+                <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
+                  &ldquo;460 g of soy flour a day.&rdquo; Mathematically perfect, impossible to
+                  cook — so nothing in the kitchen changes.
+                </p>
+              </CardContent>
+            </Card>
+          </motion.div>
+          <motion.div {...fadeUp} transition={{ delay: 0.16 }}>
+            <Card className="h-full border-primary/40 bg-primary/5 shadow-none">
+              <CardContent className="p-5">
+                <CookingPot className="size-5 text-primary" />
+                <h3 className="mt-3 text-base font-semibold">PlateFix</h3>
+                <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
+                  The smallest change to what you already cook — a spoon more dal here, a little
+                  less rice there — with every rupee of it shown as checkable math.
+                </p>
+                <Badge className="mt-3">minimum change, not a new diet</Badge>
+              </CardContent>
+            </Card>
+          </motion.div>
         </div>
       </section>
 

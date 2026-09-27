@@ -1,6 +1,7 @@
 import type { Food, FoodCategory } from "@/lib/platefix/data/foods";
 import { FOODS, foodById } from "@/lib/platefix/data/foods";
 import { NUTRIENTS, requirementsFor } from "@/lib/platefix/data/nutrients";
+import type { ProofReceipt, ProofRow } from "@/lib/platefix/proof";
 import type {
   HiddenMemberInsight,
   Household,
@@ -47,6 +48,7 @@ import {
   MessageCircle,
   Milk,
   Plus,
+  ReceiptText,
   Table2,
   Tag,
   Trash2,
@@ -59,6 +61,12 @@ import { useState } from "react";
 
 const nutrientName = new Map(NUTRIENTS.map((n) => [n.id, n]));
 const nutrientUnit = new Map(NUTRIENTS.map((n) => [n.id, n.unit]));
+
+/** Money formatting used across cards and the proof receipt. */
+export function fmtMoney(v: number, currency: string): string {
+  const symbol = currency === "INR" ? "₹" : currency === "USD" ? "$" : currency === "EUR" ? "€" : currency;
+  return `${symbol}${v.toFixed(0)}`;
+}
 
 export function nutrientLabel(id: string): string {
   return nutrientName.get(id)?.name ?? id;
@@ -939,5 +947,142 @@ export function CopyPlanButton({
       )}
       {copied ? "Copied — finish in WhatsApp" : "Share the plan on WhatsApp"}
     </Button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Proof receipt — the per-change arithmetic a judge can check by hand
+// ---------------------------------------------------------------------------
+
+const KIND_LABEL: Record<ProofRow["kind"], string> = {
+  add: "Add",
+  increase: "Increase",
+  reduce: "Reduce",
+  remove: "Remove",
+};
+
+/** One receipt line: grams × price = money, and what those grams buy. */
+function ProofReceiptRowLine({ row, currency }: { row: ProofRow; currency: string }) {
+  const food = foodById(row.foodId);
+  const gramsText =
+    row.kind === "add"
+      ? `+${row.grams} g/day`
+      : row.kind === "remove"
+        ? `−${row.grams} g/day`
+        : `${row.signedGrams > 0 ? "+" : "−"}${row.grams} g/day`;
+  const costAbs = fmtMoney(Math.abs(row.costDelta), currency);
+  const top = row.deltas.filter((d) => d.delta > 0).slice(0, 2);
+  return (
+    <div className="rounded-lg border bg-muted/30 px-3 py-2.5 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium">
+          {KIND_LABEL[row.kind]} {food?.name ?? row.foodId}{" "}
+          <span className="font-mono text-xs text-muted-foreground">
+            {gramsText} × {fmtMoney(row.pricePerKg, currency)}/kg
+          </span>
+        </span>
+        <span
+          className={
+            row.costDelta >= 0
+              ? "font-mono text-xs text-amber-600 dark:text-amber-400"
+              : "font-mono text-xs text-emerald-600 dark:text-emerald-400"
+          }
+        >
+          {row.costDelta >= 0 ? "+" : "−"}
+          {costAbs}/day
+        </span>
+      </div>
+      {top.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {top.map((d) => (
+            <Badge key={d.nutrientId} variant="outline" className="gap-1 font-normal">
+              {nutrientLabel(d.nutrientId)} +{formatValue(d.delta, unitOf(d.nutrientId))} {unitOf(d.nutrientId)}
+            </Badge>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The receipt dialog: every plan change with its own arithmetic — grams,
+ * the household's own price, the cost delta and the nutrient deltas — all
+ * recomputed from the same data files the solver reads. Nothing claimed.
+ */
+export function ProofReceiptDialog({ receipt }: { receipt: ProofReceipt | null }) {
+  if (!receipt || receipt.rows.length === 0) return null;
+  const extra = receipt.costAfter - receipt.costBefore;
+  const extraAbs = Math.abs(extra);
+  const topGainPct =
+    receipt.topGain && (receipt.rdaTotals[receipt.topGain.nutrientId] ?? 0) > 0
+      ? Math.round(
+          (receipt.topGain.delta / receipt.rdaTotals[receipt.topGain.nutrientId]) * 100,
+        )
+      : 0;
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5">
+          <ReceiptText className="size-3.5" />
+          Show the math
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ReceiptText className="size-4" /> Proof receipt
+          </DialogTitle>
+          <DialogDescription>
+            Every line recomputed by hand from the same food table and your own
+            prices the solver used. Check any line with a calculator.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2">
+          {receipt.rows.map((row) => (
+            <ProofReceiptRowLine
+              key={row.foodId}
+              row={row}
+              currency={receipt.currency}
+            />
+          ))}
+        </div>
+        <div className="rounded-lg border bg-muted/30 px-3 py-2.5 text-sm">
+          <div className="flex items-center justify-between font-medium">
+            <span>Pot cost</span>
+            <span className="font-mono">
+              {fmtMoney(receipt.costBefore, receipt.currency)} →{" "}
+              {fmtMoney(receipt.costAfter, receipt.currency)}/day
+            </span>
+          </div>
+          <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+            <span>{extra >= 0 ? "Extra spend" : "Saved"} per day</span>
+            <span className="font-mono">
+              {extra >= 0 ? "+" : "−"}
+              {fmtMoney(extraAbs, receipt.currency)}
+            </span>
+          </div>
+          <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+            <span>Weekly / monthly</span>
+            <span className="font-mono">
+              {extra >= 0 ? "+" : "−"}
+              {fmtMoney(extraAbs * 7, receipt.currency)} / wk · {extra >= 0 ? "+" : "−"}
+              {fmtMoney(extraAbs * 30, receipt.currency)} / mo
+            </span>
+          </div>
+          <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+            <span>Daily budget</span>
+            <span className="font-mono">{fmtMoney(receipt.budget, receipt.currency)}</span>
+          </div>
+          {receipt.topGain && topGainPct >= 5 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Biggest gain: {nutrientLabel(receipt.topGain.nutrientId)} +{topGainPct}%
+              of the household's total requirement — from the grams above, priced at
+              your own numbers.
+            </p>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

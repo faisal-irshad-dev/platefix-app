@@ -13,20 +13,23 @@ import {
   HiddenMemberCard,
   MemberGapCard,
   MembersEditor,
+  MEMBER_GROUP_OPTIONS,
   NoGapSpendStrip,
   PlanChangeRow,
   PotEditor,
   PricesDialog,
+  ProofReceiptDialog,
   StiglerCompareCard,
   buildHousehold,
   nutrientLabel,
 } from "@/components/platefix";
 import { DEFAULT_POT, DEMO_HOUSEHOLDS, defaultPrices } from "@/lib/platefix/data/households";
-import { IFCT_2017_CITATION } from "@/lib/platefix/data/foods";
+import { FOODS, IFCT_2017_CITATION } from "@/lib/platefix/data/foods";
 import { NIN_RDA_2020_CITATION } from "@/lib/platefix/data/nutrients";
 import type {
   Household,
   HouseholdMemberProfile,
+  MemberGroup,
   PotLine,
   PriceEntry,
 } from "@/lib/platefix/types";
@@ -38,6 +41,7 @@ import {
   solveStigler,
   spendTouchingNoGaps,
 } from "@/lib/platefix/engine";
+import { proofReceipt, shockPrices } from "@/lib/platefix/proof";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -47,8 +51,10 @@ import {
   LogOut,
   Save,
   Sparkles,
+  TrendingUp,
   Users,
 } from "lucide-react";
+import { Slider } from "@/components/ui/slider";
 import { motion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
@@ -60,6 +66,80 @@ const currencySymbol = (c: string) => (c === "INR" ? "₹" : c === "USD" ? "$" :
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "NGN", "KES", "BDT", "PHP", "IDR", "BRL"];
 
 const LOCAL_STORAGE_KEY = "platefix-household-v1";
+
+// ---- Shareable household link (#h= base64url of a slim state) -------------
+
+function encodeSharedHousehold(s: BuilderState): string {
+  const slim = {
+    v: 1,
+    name: s.name,
+    currency: s.currency,
+    dailyBudget: s.dailyBudget,
+    members: s.members.map((m) => ({ name: m.name, group: m.group, potShare: m.potShare })),
+    pot: s.pot,
+    prices: s.prices.map((p) => ({ foodId: p.foodId, pricePerKg: p.pricePerKg })),
+  };
+  const bytes = new TextEncoder().encode(JSON.stringify(slim));
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function decodeSharedHousehold(hash: string): BuilderState | null {
+  try {
+    const b64 = hash.replace(/-/g, "+").replace(/_/g, "/");
+    const bin = atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4));
+    const bytes = Uint8Array.from(bin, (ch) => ch.charCodeAt(0));
+    const data = JSON.parse(new TextDecoder().decode(bytes)) as {
+      name?: string;
+      currency?: string;
+      dailyBudget?: number;
+      members?: { name?: string; group?: string; potShare?: number }[];
+      pot?: { foodId: string; qtyPerDayG: number }[];
+      prices?: { foodId: string; pricePerKg: number }[];
+    } | null;
+    if (!data || !Array.isArray(data.members) || data.members.length === 0) return null;
+    const validGroups = new Set(MEMBER_GROUP_OPTIONS.map((g) => g.group));
+    const members: HouseholdMemberProfile[] = data.members
+      .filter((m) => !!m && validGroups.has(m.group as MemberGroup))
+      .map((m, i) => ({
+        id: `m-${i + 1}`,
+        name: (m.name || `Member ${i + 1}`).slice(0, 40),
+        group: m.group as MemberGroup,
+        potShare:
+          typeof m.potShare === "number" && m.potShare > 0 && m.potShare <= 1
+            ? m.potShare
+            : 1 / data.members!.length,
+        requirements: [],
+      }));
+    if (members.length === 0) return null;
+    const knownFood = new Set(FOODS.map((f) => f.id));
+    return {
+      name: typeof data.name === "string" && data.name ? data.name.slice(0, 60) : "Shared household",
+      currency: typeof data.currency === "string" && data.currency ? data.currency : "INR",
+      dailyBudget:
+        typeof data.dailyBudget === "number" && data.dailyBudget >= 0 ? data.dailyBudget : 320,
+      members,
+      pot: Array.isArray(data.pot)
+        ? data.pot.filter(
+            (l) =>
+              !!l && knownFood.has(l.foodId) && typeof l.qtyPerDayG === "number" && l.qtyPerDayG > 0,
+          )
+        : DEFAULT_POT.map((l) => ({ ...l })),
+      prices:
+        Array.isArray(data.prices) && data.prices.length > 0
+          ? data.prices
+              .filter(
+                (p) =>
+                  !!p && knownFood.has(p.foodId) && typeof p.pricePerKg === "number" && p.pricePerKg >= 0,
+              )
+              .map((p) => ({ foodId: p.foodId, pricePerKg: p.pricePerKg, source: "shared link", verified: false }))
+          : defaultPrices(),
+    };
+  } catch {
+    return null;
+  }
+}
 
 interface BuilderState {
   name: string;
@@ -101,6 +181,15 @@ export default function Dashboard() {
   useEffect(() => {
     if (saved === undefined || hydratedRef.current) return;
     hydratedRef.current = true;
+    // A shared link loads the sender's household without any sign-in step.
+    if (window.location.hash.startsWith("#h=")) {
+      const shared = decodeSharedHousehold(window.location.hash.slice(3));
+      if (shared) {
+        setState(shared);
+        window.history.replaceState(null, "", window.location.pathname + window.location.search);
+        return;
+      }
+    }
     if (saved) {
       setState({
         name: saved.data.name,
@@ -216,6 +305,47 @@ export default function Dashboard() {
       return null;
     return spendTouchingNoGaps(household, state.pot, state.prices);
   }, [household, state]);
+
+  // Proof receipt: per-change arithmetic recomputed from the same data files
+  // the solver reads — shown in the "Show the math" dialog.
+  const receipt = useMemo(() => {
+    if (!household || !state || !result || result.empty) return null;
+    if (result.plan.changes.length === 0) return null;
+    try {
+      return proofReceipt(household, state.pot, state.prices, result.plan);
+    } catch (err) {
+      console.error("proofReceipt failed", err);
+      return null;
+    }
+  }, [household, state, result]);
+
+  // Market shock: "what if prices move tomorrow?" — the full plan re-solved
+  // at shocked prices, live. Never a claim, always a computation.
+  const [shockPct, setShockPct] = useState(0);
+  const shock = useMemo(() => {
+    if (!household || !state || shockPct === 0) return null;
+    if (household.members.length === 0 || state.pot.length === 0) return null;
+    try {
+      return shockPrices(household, state.pot, state.prices, 1 + shockPct / 100);
+    } catch (err) {
+      console.error("shockPrices failed", err);
+      return null;
+    }
+  }, [household, state, shockPct]);
+
+  // Shareable link: the whole household (members, pot, budget, prices) in the URL.
+  const [linkCopied, setLinkCopied] = useState(false);
+  const shareLink = () => {
+    if (!state) return;
+    const url = `${window.location.origin}${window.location.pathname}#h=${encodeSharedHousehold(state)}`;
+    try {
+      void navigator.clipboard?.writeText(url);
+    } catch {
+      // Clipboard blocked — nothing else to do; the URL is still in the bar.
+    }
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  };
 
   // Quick-start scenarios: load a demo household into the live editor.
   const loadScenario = (hh: Household) => {
@@ -333,6 +463,16 @@ export default function Dashboard() {
               </span>
             </Button>
           ))}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5 text-muted-foreground"
+            onClick={shareLink}
+          >
+            <Link2 className="size-3.5" />
+            {linkCopied ? "Link copied" : "Copy share link"}
+          </Button>
         </div>
 
         {/* Step 1 — household identity + members */}
@@ -612,6 +752,22 @@ export default function Dashboard() {
                     </p>
                   </div>
                 </div>
+                {(() => {
+                  const d = plan!.costAfter - plan!.costBefore;
+                  const sign = d >= 0 ? "+" : "−";
+                  const a = Math.abs(d);
+                  return (
+                    <p className="text-center text-xs text-muted-foreground">
+                      {sign}
+                      {symbol}
+                      {a.toFixed(0)}/day ≈ {sign}
+                      {symbol}
+                      {(a * 7).toFixed(0)}/week · {sign}
+                      {symbol}
+                      {(a * 30).toFixed(0)}/month for the whole family
+                    </p>
+                  );
+                })()}
 
                 {/* Status banner */}
                 {plan!.feasible ? (
@@ -671,7 +827,7 @@ export default function Dashboard() {
             )}
 
             {plan && plan.changes.length > 0 && (
-              <div className="mt-4">
+              <div className="mt-4 flex flex-wrap items-center gap-2">
                 <CopyPlanButton
                   householdName={state.name}
                   plan={plan}
@@ -682,6 +838,7 @@ export default function Dashboard() {
                       : undefined
                   }
                 />
+                <ProofReceiptDialog receipt={receipt} />
               </div>
             )}
 
@@ -697,6 +854,57 @@ export default function Dashboard() {
             )}
           </section>
         </div>
+
+        {/* Market shock — "what if prices move?" answered live, not claimed */}
+        <Card className="mt-8 border-border/70 shadow-none">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <TrendingUp className="size-3.5 text-primary" />
+              What if prices move?
+            </CardTitle>
+            <CardDescription>
+              The full plan, re-solved at different price levels from your own price list.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center gap-3">
+              <Slider
+                value={[shockPct]}
+                onValueChange={(v) => setShockPct(v[0] ?? 0)}
+                min={-30}
+                max={30}
+                step={5}
+                aria-label="Price change percent"
+                className="max-w-md flex-1"
+              />
+              <span className="w-16 shrink-0 text-right text-sm font-semibold tabular-nums">
+                {shockPct > 0 ? "+" : ""}
+                {shockPct}%
+              </span>
+            </div>
+            {shock ? (
+              shock.stillFeasible ? (
+                <p className="text-sm text-emerald-700 dark:text-emerald-400">
+                  At {shockPct > 0 ? "+" : ""}
+                  {shockPct}% prices the plan still closes every gap: the fixed pot costs{' '}
+                  {symbol}
+                  {shock.costAfter.toFixed(0)}/day (today&apos;s pot would cost {symbol}
+                  {shock.costBefore.toFixed(0)}).
+                </p>
+              ) : (
+                <p className="text-sm text-amber-700 dark:text-amber-400">
+                  At {shockPct > 0 ? "+" : ""}
+                  {shockPct}% prices the plan can no longer close every gap — and the app says so
+                  plainly instead of pretending otherwise.
+                </p>
+              )
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Drag the slider to stress-test the plan against price swings.
+              </p>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Data provenance */}
         <Card className="mt-8 border-border/70 shadow-none">
