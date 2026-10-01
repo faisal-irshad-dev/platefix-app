@@ -82,13 +82,13 @@ export default function Landing() {
               EurekaDev · Problem in the Community
             </Badge>
             <h1 className="text-4xl font-extrabold leading-[1.1] tracking-tight sm:text-5xl">
-              The smallest change that{" "}
-              <span className="text-primary">fixes the family pot</span>
+              The <span className="text-primary">smallest, cheapest</span> fix for every
+              plate at the table.
             </h1>
             <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground sm:text-lg">
-              No new recipes, no new shopping list — PlateFix finds the one swap to the meal a
-              family already cooks that closes the most nutrient gaps for the least money,
-              ranked by cost per gap closed. And it says plainly when food alone can&apos;t.
+              One shared meal. Different needs. PlateFix finds the single swap that works for
+              everyone — no new recipes, no separate cooking — ranked by cost per nutrient
+              closed, and honest when food alone can&apos;t.
             </p>
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">
               <Button asChild size="lg" className="gap-2">
@@ -115,11 +115,27 @@ export default function Landing() {
           >
             <Card className="border-border/70 shadow-lg shadow-primary/5">
               <CardContent className="space-y-4 p-5">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold">Ananya · 14, girl</p>
-                  <Badge variant="destructive" className="text-[10px]">3 gaps</Badge>
+                {/* Household conflict, resolved — one shared plate */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="flex items-center gap-1.5 rounded-full border border-border/70 bg-card py-1 pl-1 pr-2.5 text-xs">
+                    <span className="flex size-5 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">
+                      M
+                    </span>
+                    Mom · iron target
+                  </span>
+                  <span className="flex items-center gap-1.5 rounded-full border border-border/70 bg-card py-1 pl-1 pr-2.5 text-xs">
+                    <span className="flex size-5 items-center justify-center rounded-full bg-saffron-soft text-[10px] font-bold text-foreground">
+                      D
+                    </span>
+                    Dad · calcium target
+                  </span>
+                  <span className="flex items-center gap-1 text-xs font-semibold text-primary">
+                    <CheckCircle2 className="size-3.5" />
+                    one shared plate
+                  </span>
                 </div>
-                {[
+                <div className="h-px bg-border/70" />
+                {[ 
                   { label: "Iron", got: 62, rda: 27, pct: 62 },
                   { label: "Folate", got: 71, rda: 300, pct: 71 },
                   { label: "Calcium", got: 78, rda: 850, pct: 78 },
@@ -133,19 +149,28 @@ export default function Landing() {
                     </div>
                     <div className="h-2 overflow-hidden rounded-full bg-muted">
                       <div
-                        className={`h-full rounded-full ${n.pct >= 100 ? "bg-emerald-600" : n.pct >= 75 ? "bg-amber-500" : "bg-orange-500"}`}
+                        className={`h-full rounded-full ${n.pct >= 100 ? "bg-primary" : n.pct >= 75 ? "bg-saffron" : "bg-destructive"}`}
                         style={{ width: `${n.pct}%` }}
                       />
                     </div>
                   </div>
                 ))}
-                <div className="rounded-lg border border-emerald-600/30 bg-emerald-600/10 p-3 text-xs leading-5">
-                  <p className="flex items-center gap-1.5 font-semibold text-emerald-800 dark:text-emerald-300">
-                    <CheckCircle2 className="size-3.5" />
-                    The fix: 3 changes, about ₹18 more per day
+                {/* Swap suggestion — cost per nutrient closed */}
+                <div className="rounded-xl border border-border/70 bg-secondary/60 p-3.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Cost per nutrient closed
                   </p>
-                  <p className="mt-1 text-emerald-800/80 dark:text-emerald-300/80">
-                    +150 g spinach · +100 g curd · rice ↓ 100 g
+                  <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                    <span className="font-semibold">+150 g spinach</span>
+                    <ArrowRight className="size-3.5 text-saffron" aria-hidden />
+                    <span className="font-bold text-primary">iron gap closed 72%</span>
+                  </div>
+                  <p className="mt-0.5 text-xs">
+                    Added cost <span className="font-semibold">₹18/wk</span> · same pot, same night
+                  </p>
+                  <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+                    Spinach carries more iron per gram than rice at this week&apos;s local price,
+                    without pushing anyone&apos;s plate off its usual shape.
                   </p>
                 </div>
               </CardContent>

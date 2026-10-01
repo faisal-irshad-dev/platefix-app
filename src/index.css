@@ -40,76 +40,89 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  /* PlateFix design system — type */
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Manrope", "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* PlateFix design system — brand accents */
+  --color-saffron: var(--saffron);
+  --color-saffron-soft: var(--saffron-soft);
 }
 
-/* CHANGE VALUES FOR THEME — PlateFix: warm kitchen palette (clay, turmeric, cream) */
+/* CHANGE VALUES FOR THEME — PlateFix design system:
+   Basil #3F5C3F (primary) · Saffron #D98E2B (highlight) · Flour #FBF9F4
+   (background) · Coffee Ink #2B2420 (foreground) · Saffron Soft (wash).
+   Manrope carries the confident moments; Inter carries everything you read. */
 :root {
   --radius: 0.625rem;
-  --background: oklch(0.985 0.008 85);
-  --foreground: oklch(0.24 0.03 45);
-  --card: oklch(1 0.004 85);
-  --card-foreground: oklch(0.24 0.03 45);
-  --popover: oklch(1 0.004 85);
-  --popover-foreground: oklch(0.24 0.03 45);
-  --primary: oklch(0.55 0.16 38);
-  --primary-foreground: oklch(0.985 0.01 85);
-  --secondary: oklch(0.955 0.02 90);
-  --secondary-foreground: oklch(0.3 0.04 45);
-  --muted: oklch(0.95 0.015 88);
-  --muted-foreground: oklch(0.47 0.03 50);
-  --accent: oklch(0.9 0.09 95);
-  --accent-foreground: oklch(0.3 0.05 60);
-  --destructive: oklch(0.55 0.2 25);
-  --border: oklch(0.9 0.02 80);
-  --input: oklch(0.9 0.02 80);
-  --ring: oklch(0.62 0.13 40);
-  --chart-1: oklch(0.55 0.16 38);
-  --chart-2: oklch(0.72 0.14 95);
-  --chart-3: oklch(0.6 0.13 145);
-  --chart-4: oklch(0.62 0.12 250);
-  --chart-5: oklch(0.6 0.16 20);
-  --sidebar: oklch(0.975 0.012 85);
-  --sidebar-foreground: oklch(0.24 0.03 45);
-  --sidebar-primary: oklch(0.55 0.16 38);
-  --sidebar-primary-foreground: oklch(0.985 0.01 85);
-  --sidebar-accent: oklch(0.93 0.04 90);
-  --sidebar-accent-foreground: oklch(0.3 0.04 45);
-  --sidebar-border: oklch(0.9 0.02 80);
-  --sidebar-ring: oklch(0.62 0.13 40);
+  --background: oklch(0.977 0.007 90);          /* Flour */
+  --foreground: oklch(0.26 0.014 58);           /* Coffee Ink */
+  --card: oklch(1 0.003 95);
+  --card-foreground: oklch(0.26 0.014 58);
+  --popover: oklch(1 0.003 95);
+  --popover-foreground: oklch(0.26 0.014 58);
+  --primary: oklch(0.44 0.055 150);             /* Basil */
+  --primary-foreground: oklch(0.977 0.008 90);
+  --secondary: oklch(0.93 0.045 85);            /* Saffron Soft */
+  --secondary-foreground: oklch(0.26 0.014 58);
+  --muted: oklch(0.95 0.012 88);
+  --muted-foreground: oklch(0.48 0.022 60);
+  --accent: oklch(0.93 0.05 85);
+  --accent-foreground: oklch(0.26 0.014 58);
+  --destructive: oklch(0.55 0.19 27);
+  --border: oklch(0.9 0.014 85);
+  --input: oklch(0.9 0.014 85);
+  --ring: oklch(0.5 0.07 150);
+  --saffron: oklch(0.75 0.125 72);              /* Saffron */
+  --saffron-soft: oklch(0.93 0.05 85);
+  --chart-1: oklch(0.44 0.055 150);
+  --chart-2: oklch(0.75 0.125 72);
+  --chart-3: oklch(0.62 0.11 145);
+  --chart-4: oklch(0.45 0.03 60);
+  --chart-5: oklch(0.58 0.14 30);
+  --sidebar: oklch(0.965 0.01 90);
+  --sidebar-foreground: oklch(0.26 0.014 58);
+  --sidebar-primary: oklch(0.44 0.055 150);
+  --sidebar-primary-foreground: oklch(0.977 0.008 90);
+  --sidebar-accent: oklch(0.93 0.045 85);
+  --sidebar-accent-foreground: oklch(0.26 0.014 58);
+  --sidebar-border: oklch(0.9 0.014 85);
+  --sidebar-ring: oklch(0.5 0.07 150);
 }
 
 .dark {
-  --background: oklch(0.19 0.02 45);
-  --foreground: oklch(0.965 0.012 85);
-  --card: oklch(0.235 0.025 45);
-  --card-foreground: oklch(0.965 0.012 85);
-  --popover: oklch(0.235 0.025 45);
-  --popover-foreground: oklch(0.965 0.012 85);
-  --primary: oklch(0.72 0.14 45);
-  --primary-foreground: oklch(0.2 0.03 40);
-  --secondary: oklch(0.29 0.03 48);
-  --secondary-foreground: oklch(0.95 0.012 85);
-  --muted: oklch(0.28 0.028 48);
-  --muted-foreground: oklch(0.72 0.03 75);
-  --accent: oklch(0.35 0.05 90);
-  --accent-foreground: oklch(0.95 0.012 85);
-  --destructive: oklch(0.65 0.19 25);
-  --border: oklch(1 0.02 80 / 12%);
-  --input: oklch(1 0.02 80 / 16%);
-  --ring: oklch(0.72 0.14 45);
-  --chart-1: oklch(0.72 0.14 45);
-  --chart-2: oklch(0.8 0.14 95);
-  --chart-3: oklch(0.7 0.13 145);
-  --chart-4: oklch(0.7 0.12 250);
-  --chart-5: oklch(0.68 0.16 20);
-  --sidebar: oklch(0.215 0.022 45);
-  --sidebar-foreground: oklch(0.965 0.012 85);
-  --sidebar-primary: oklch(0.72 0.14 45);
-  --sidebar-primary-foreground: oklch(0.2 0.03 40);
-  --sidebar-accent: oklch(0.3 0.03 48);
-  --sidebar-accent-foreground: oklch(0.95 0.012 85);
-  --sidebar-border: oklch(1 0.02 80 / 12%);
-  --sidebar-ring: oklch(0.72 0.14 45);
+  --background: oklch(0.2 0.014 60);
+  --foreground: oklch(0.96 0.01 90);
+  --card: oklch(0.245 0.016 60);
+  --card-foreground: oklch(0.96 0.01 90);
+  --popover: oklch(0.245 0.016 60);
+  --popover-foreground: oklch(0.96 0.01 90);
+  --primary: oklch(0.74 0.1 148);
+  --primary-foreground: oklch(0.2 0.02 150);
+  --secondary: oklch(0.29 0.03 70);
+  --secondary-foreground: oklch(0.95 0.015 90);
+  --muted: oklch(0.28 0.018 60);
+  --muted-foreground: oklch(0.74 0.02 80);
+  --accent: oklch(0.35 0.045 75);
+  --accent-foreground: oklch(0.95 0.015 90);
+  --destructive: oklch(0.66 0.18 27);
+  --border: oklch(1 0.01 90 / 12%);
+  --input: oklch(1 0.01 90 / 16%);
+  --ring: oklch(0.74 0.1 148);
+  --saffron: oklch(0.8 0.11 75);
+  --saffron-soft: oklch(0.35 0.05 75);
+  --chart-1: oklch(0.74 0.1 148);
+  --chart-2: oklch(0.8 0.11 75);
+  --chart-3: oklch(0.7 0.11 145);
+  --chart-4: oklch(0.72 0.03 60);
+  --chart-5: oklch(0.68 0.15 30);
+  --sidebar: oklch(0.225 0.015 60);
+  --sidebar-foreground: oklch(0.96 0.01 90);
+  --sidebar-primary: oklch(0.74 0.1 148);
+  --sidebar-primary-foreground: oklch(0.2 0.02 150);
+  --sidebar-accent: oklch(0.29 0.03 70);
+  --sidebar-accent-foreground: oklch(0.95 0.015 90);
+  --sidebar-border: oklch(1 0.01 90 / 12%);
+  --sidebar-ring: oklch(0.74 0.1 148);
 }
 
 @layer base {
@@ -119,9 +132,18 @@
   body {
     @apply bg-background text-foreground;
     background-image:
-      radial-gradient(1200px 500px at 85% -10%, oklch(0.9 0.07 95 / 35%), transparent 60%),
-      radial-gradient(900px 420px at 0% 0%, oklch(0.88 0.06 45 / 25%), transparent 55%);
+      radial-gradient(1200px 500px at 85% -10%, oklch(0.93 0.05 85 / 45%), transparent 60%),
+      radial-gradient(900px 420px at 0% 0%, oklch(0.44 0.055 150 / 10%), transparent 55%);
     background-attachment: fixed;
+  }
+  /* Manrope carries the confident moments: display + headings.
+     Inter (the default --font-sans) carries everything you read. */
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
   }
   button:not([disabled]),
   [role="button"]:not([disabled]) {

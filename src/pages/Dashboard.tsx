@@ -435,7 +435,7 @@ export default function Dashboard() {
         <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-              The smallest change that fixes the family pot
+              The smallest, cheapest fix for every plate at the table
             </h1>
             <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
               No new recipes, no new shopping list — the smallest, cheapest change to the pot
