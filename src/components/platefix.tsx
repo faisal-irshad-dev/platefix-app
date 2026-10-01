@@ -202,7 +202,16 @@ const KIND_STYLE: Record<
   remove: { label: "Remove", icon: "−", className: "bg-red-600/15 text-red-700 dark:text-red-400" },
 };
 
-export function PlanChangeRow({ change, currency }: { change: PlanChange; currency: string }) {
+export function PlanChangeRow({
+  change,
+  currency,
+  closesGaps,
+}: {
+  change: PlanChange;
+  currency: string;
+  /** Open member×nutrient gaps this change alone closes (from oneSwap). */
+  closesGaps?: number;
+}) {
   const food = foodById(change.foodId);
   const style = KIND_STYLE[change.kind];
   const money = (v: number) =>
@@ -228,6 +237,15 @@ export function PlanChangeRow({ change, currency }: { change: PlanChange; curren
           {food?.localName ? ` · ${food.localName}` : ""}
         </p>
       </div>
+      {closesGaps !== undefined && closesGaps > 0 && (
+        <Badge
+          variant="outline"
+          className="shrink-0 gap-1 text-[10px] font-normal text-emerald-700 dark:text-emerald-400"
+        >
+          <Check className="size-3" />
+          closes {closesGaps} {closesGaps === 1 ? "gap" : "gaps"}
+        </Badge>
+      )}
       <span
         className={`shrink-0 text-sm font-semibold tabular-nums ${
           change.costDelta > 0.5

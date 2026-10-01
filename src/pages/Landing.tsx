@@ -35,7 +35,7 @@ const STEPS = [
   {
     icon: Sparkles,
     title: "Get the smallest change",
-    body: "A short list of add / increase / reduce changes that closes every member's gaps within budget — or an honest word if food alone can't.",
+    body: "The one swap to start with tonight, ranked by cost per gap closed — then the short add / increase / reduce list that covers everyone within budget, or an honest word if food alone can't.",
   },
 ];
 
@@ -86,8 +86,9 @@ export default function Landing() {
               <span className="text-primary">fixes the family pot</span>
             </h1>
             <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground sm:text-lg">
-              PlateFix finds the cheapest, smallest change to a family&apos;s shared meals that
-              covers what each member is missing — and says so plainly when food alone can&apos;t.
+              No new recipes, no new shopping list — PlateFix finds the one swap to the meal a
+              family already cooks that closes the most nutrient gaps for the least money,
+              ranked by cost per gap closed. And it says plainly when food alone can&apos;t.
             </p>
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">
               <Button asChild size="lg" className="gap-2">

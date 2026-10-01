@@ -24,7 +24,7 @@ import {
   nutrientLabel,
 } from "@/components/platefix";
 import { DEFAULT_POT, DEMO_HOUSEHOLDS, defaultPrices } from "@/lib/platefix/data/households";
-import { FOODS, IFCT_2017_CITATION } from "@/lib/platefix/data/foods";
+import { FOODS, IFCT_2017_CITATION, foodById } from "@/lib/platefix/data/foods";
 import { NIN_RDA_2020_CITATION } from "@/lib/platefix/data/nutrients";
 import type {
   Household,
@@ -41,7 +41,7 @@ import {
   solveStigler,
   spendTouchingNoGaps,
 } from "@/lib/platefix/engine";
-import { proofReceipt, shockPrices } from "@/lib/platefix/proof";
+import { oneSwap, proofReceipt, shockPrices } from "@/lib/platefix/proof";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -319,6 +319,19 @@ export default function Dashboard() {
     }
   }, [household, state, result]);
 
+  // The ONE swap: each plan change applied alone, ranked by cost per gap
+  // closed — the 30-second answer for a family cooking the same meal tonight.
+  const swaps = useMemo(() => {
+    if (!household || !state || !result || result.empty) return [];
+    if (result.plan.changes.length === 0) return [];
+    try {
+      return oneSwap(household, state.pot, state.prices, result.plan);
+    } catch (err) {
+      console.error("oneSwap failed", err);
+      return [];
+    }
+  }, [household, state, result]);
+
   // Market shock: "what if prices move tomorrow?" — the full plan re-solved
   // at shocked prices, live. Never a claim, always a computation.
   const [shockPct, setShockPct] = useState(0);
@@ -425,8 +438,9 @@ export default function Dashboard() {
               The smallest change that fixes the family pot
             </h1>
             <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Everything below is yours to edit — members, pot, budget, prices. The plan
-              recalculates live with every change and saves automatically.
+              No new recipes, no new shopping list — the smallest, cheapest change to the pot
+              you already cook, recalculated live as you edit members, pot, budget and prices,
+              and saved automatically.
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -715,6 +729,29 @@ export default function Dashboard() {
               </Card>
             ) : (
               <div className="space-y-3">
+                {swaps.length > 0 && swaps[0].gapsClosed > 0 && (
+                  <div className="rounded-xl border border-primary/40 bg-primary/5 p-4">
+                    <p className="flex items-center gap-1.5 text-sm font-semibold">
+                      <Sparkles className="size-4 text-primary" />
+                      Start tonight with one swap
+                    </p>
+                    <p className="mt-1 text-sm">
+                      {swaps[0].change.kind === "add"
+                        ? "Add"
+                        : swaps[0].change.kind === "increase"
+                          ? "Increase"
+                          : swaps[0].change.kind === "reduce"
+                            ? "Reduce"
+                            : "Drop"}{" "}
+                      {foodById(swaps[0].change.foodId)?.name ?? swaps[0].change.foodId} —{" "}
+                      {swaps[0].summary}.
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      No new recipes, no new shopping list — one change to the pot you already
+                      cook. The full minimum-change plan follows.
+                    </p>
+                  </div>
+                )}
                 <div className="space-y-2">
                   {plan!.changes.map((c, i) => (
                     <motion.div
@@ -723,7 +760,15 @@ export default function Dashboard() {
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: Math.min(i * 0.05, 0.3), duration: 0.3 }}
                     >
-                      <PlanChangeRow change={c} currency={household.currency} />
+                      <PlanChangeRow
+                        change={c}
+                        currency={household.currency}
+                        closesGaps={
+                          swaps.find(
+                            (s) => s.change.foodId === c.foodId && s.change.kind === c.kind,
+                          )?.gapsClosed
+                        }
+                      />
                     </motion.div>
                   ))}
                 </div>

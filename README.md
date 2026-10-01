@@ -26,6 +26,42 @@ Built for **EurekaDev · Coding Track · "Problem in the Community"**.
 PlateFix layers a **minimum-change objective** and a **limiting-member insight**
 onto proven optimization math (linear programming, solved in the browser).
 
+## Positioning
+
+**Who it's for:** budget-constrained households — regional, cost-sensitive
+families who can't afford a dietitian, a premium nutrition subscription, or the
+time and money to cook separate meals for different needs. Today they either
+overspend on specialized apps and meal kits, or just eat what they eat and
+absorb the health cost. Nothing meets them where their actual grocery budget
+and actual meal already are.
+
+**The core insight:** the optimization math isn't the innovation — nobody
+disputes that multi-person nutrient optimization is a known operations-research
+problem. The innovation is collapsing it into something a family with zero
+nutrition background can use in 30 seconds: not a new meal plan, not a new app
+habit — **the one swap, ranked by cost-per-nutrient-gap-closed, starting from
+the meal they already cook.**
+
+**How that differs from prior work:**
+
+| Prior work | What it is | What PlateFix does differently |
+| --- | --- | --- |
+| The 2011 patent on computer-implemented meal selection | A general dish-selection engine choosing from a broad catalog | A minimal swap to the family's *existing* pot with an explicit cost lens — never a catalog to browse |
+| Academic multi-objective diet optimization papers | Published but unproductized research | Shipped, browser-only, swap-based, budget-first — usable by someone who has never heard of linear programming |
+| FamilyPlate.ai and similar meal planners | Generates a whole new meal plan for dietary compatibility | A single minimal change to what is already on the table, for nutrient-gap closure |
+
+The messaging leads with cost, not math — the app's own words are
+"no new recipes, no new shopping list — just swap X for Y, a few paise more,
+closes most of the gap."
+
+## Prepared answer: "Isn't this just the 2011 patent / the academic research?"
+
+> The underlying optimization isn't new — multi-person nutrient balancing has
+> existed in research for over a decade. What doesn't exist is a shipped product
+> that applies it as a single, minimal, affordable swap to a family's existing
+> meal instead of asking them to adopt a whole new meal plan. That's the gap:
+> **not the math, the accessibility.**
+
 ## What it does
 
 1. **Describe the table** — who eats from the pot and each member's share.

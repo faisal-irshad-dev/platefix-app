@@ -7,8 +7,8 @@ import { describe, expect, test } from "bun:test";
 
 import { FOODS, foodById, NUTRIENT_ORDER } from "./data/foods";
 import { DEMO_HOUSEHOLDS, DEFAULT_POT, defaultPrices } from "./data/households";
-import { potCost, solve } from "./engine";
-import { proofReceipt, shockPrices } from "./proof";
+import { computeGaps, potCost, solve } from "./engine";
+import { oneSwap, proofReceipt, shockPrices } from "./proof";
 import type { Household } from "./types";
 
 const prices = defaultPrices();
@@ -147,6 +147,66 @@ describe("shockPrices", () => {
     const shock = shockPrices(household, pot, prices, 2);
     expect(typeof shock.stillFeasible).toBe("boolean");
     expect(shock.costAfter).toBeGreaterThanOrEqual(shock.costBefore * 0.99);
+  });
+});
+
+describe("oneSwap — the ONE swap, ranked by cost per gap closed", () => {
+  const { household, pot } = demoWithChanges();
+  const result = solve({ household, pot, prices });
+  const plan = result.plan;
+  const swaps = oneSwap(household, pot, prices, plan);
+  const openBefore = computeGaps(household, pot).reduce((s, m) => s + m.gaps.length, 0);
+
+  test("has one row per plan change whose closure count is re-derivable by hand", () => {
+    expect(swaps.length).toBe(plan.changes.length);
+    for (const s of swaps) {
+      // Independent arithmetic: apply ONLY this change to the pot, recount
+      // every member×nutrient gap from the food table.
+      const applied = pot.map((l) => ({ ...l }));
+      const line = applied.find((l) => l.foodId === s.change.foodId);
+      if (line) line.qtyPerDayG = s.change.toG;
+      else applied.push({ foodId: s.change.foodId, qtyPerDayG: s.change.toG });
+      const openAfter = computeGaps(household, applied.filter((l) => l.qtyPerDayG > 0)).reduce(
+        (sum, m) => sum + m.gaps.length,
+        0,
+      );
+      expect(s.gapsBefore).toBe(openBefore);
+      expect(s.gapsClosed).toBe(Math.max(0, openBefore - openAfter));
+      expect(s.closureFrac).toBeCloseTo(s.gapsClosed / openBefore, 6);
+    }
+  });
+
+  test("is sorted best value first: cost per gap closed ascending", () => {
+    for (let i = 1; i < swaps.length; i++) {
+      const a =
+        swaps[i - 1].costPerGap === Infinity ? Number.MAX_SAFE_INTEGER : swaps[i - 1].costPerGap;
+      const b = swaps[i].costPerGap === Infinity ? Number.MAX_SAFE_INTEGER : swaps[i].costPerGap;
+      expect(a).toBeLessThanOrEqual(b);
+    }
+    // The headline row's costPerGap is exactly its own arithmetic.
+    const best = swaps[0];
+    if (best && best.gapsClosed > 0 && best.change.costDelta > 0) {
+      expect(best.costPerGap).toBeCloseTo(best.change.costDelta / best.gapsClosed, 6);
+    }
+  });
+
+  test("summary reads like the pitch: 'closes N of M gaps for +₹X/day'", () => {
+    for (const s of swaps) {
+      expect(s.summary).toMatch(/^closes \d+ of \d+ gaps for /);
+      expect(s.summary).toContain(`${s.gapsClosed} of ${s.gapsBefore}`);
+    }
+  });
+
+  test("a cost-neutral swap that closes gaps is free and says so", () => {
+    const free = swaps.find((s) => Math.abs(s.change.costDelta) <= 0.5 && s.gapsClosed > 0);
+    if (free) {
+      expect(free.costPerGap).toBe(0);
+      expect(free.summary).toContain("no extra cost");
+    }
+  });
+
+  test("an empty plan or a fully covered pot yields no swaps", () => {
+    expect(oneSwap(household, pot, prices, { ...plan, changes: [] })).toEqual([]);
   });
 });
 

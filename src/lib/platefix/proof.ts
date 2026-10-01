@@ -4,8 +4,14 @@
 // claimed; everything shown is a product.
 
 import { foodById, NUTRIENT_ORDER, type FoodNutrients } from "./data/foods";
-import { potNutrients, solve, type SolveInput } from "./engine";
-import type { Household, MinimumChangePlan, PotLine, PriceEntry } from "./types";
+import { computeGaps, potNutrients, solve, type SolveInput } from "./engine";
+import type {
+  Household,
+  MinimumChangePlan,
+  PlanChange,
+  PotLine,
+  PriceEntry,
+} from "./types";
 
 /** One change's hand-checkable math. */
 export interface ProofRow {
@@ -151,6 +157,93 @@ function potCostOf(pot: PotLine[], perKg: Map<string, number>): number {
     (s, l) => s + (l.qtyPerDayG / 1000) * (perKg.get(l.foodId) ?? 0),
     0,
   );
+}
+
+// ---------------------------------------------------------------------------
+// The one swap — cost per nutrient-gap-closed, ranked
+// ---------------------------------------------------------------------------
+
+/**
+ * The single-change story, ranked by value for money: apply each plan change
+ * ALONE to the real pot, recompute every member's gaps from the food table,
+ * and count how many member×nutrient gaps close. `costPerGap` is exactly what
+ * the pitch promises — "swap X for Y, 40 paise more, closes most of the gap"
+ * — computed, never claimed. The best row is the ONE swap a family with no
+ * time for a meal plan starts with tonight.
+ */
+export interface OneSwap {
+  change: PlanChange;
+  /** Open member×nutrient gaps before any change. */
+  gapsBefore: number;
+  /** Gaps that no longer fall below their warn threshold with ONLY this change. */
+  gapsClosed: number;
+  /** Gap closure as a fraction of the household's open gaps (0..1). */
+  closureFrac: number;
+  /** Cost per gap closed (currency); 0 when the swap is cost-neutral or free. */
+  costPerGap: number;
+  /** Human line: "closes 2 of 5 gaps for +₹4/day". */
+  summary: string;
+}
+
+export function oneSwap(
+  household: Household,
+  pot: PotLine[],
+  prices: PriceEntry[],
+  plan: MinimumChangePlan,
+): OneSwap[] {
+  if (household.members.length === 0 || plan.changes.length === 0) return [];
+  const gapsBefore = computeGaps(household, pot);
+  const openBefore = gapsBefore.reduce((s, m) => s + m.gaps.length, 0);
+  if (openBefore === 0) return [];
+
+  const rows = plan.changes.map((change) => {
+    const applied = pot.map((l) => ({ ...l }));
+    const line = applied.find((l) => l.foodId === change.foodId);
+    if (line) line.qtyPerDayG = change.toG;
+    else applied.push({ foodId: change.foodId, qtyPerDayG: change.toG });
+    const clean = applied.filter((l) => l.qtyPerDayG > 0);
+    const after = computeGaps(household, clean);
+    const openAfter = after.reduce((s, m) => s + m.gaps.length, 0);
+    const closed = Math.max(0, openBefore - openAfter);
+    return { change, closed };
+  });
+
+  return rows
+    .map(({ change, closed }) => {
+      const extra = Math.max(0, change.costDelta);
+      const costPerGap = closed > 0 ? extra / closed : extra > 0 ? Infinity : 0;
+      const symbol =
+        household.currency === "INR"
+          ? "₹"
+          : household.currency === "USD"
+            ? "$"
+            : household.currency === "EUR"
+              ? "€"
+              : household.currency;
+      const money =
+        change.costDelta >= 0.5
+          ? `+${symbol}${change.costDelta.toFixed(0)}`
+          : change.costDelta <= -0.5
+            ? `−${symbol}${Math.abs(change.costDelta).toFixed(0)}`
+            : "no extra cost";
+      return {
+        change,
+        gapsBefore: openBefore,
+        gapsClosed: closed,
+        closureFrac: closed / openBefore,
+        costPerGap,
+        summary: `closes ${closed} of ${openBefore} gaps for ${money}/day`,
+      };
+    })
+    .sort((a, b) => {
+      // Best value for money first: most gaps closed per rupee, then most
+      // closed, then cheapest.
+      const aCost = a.costPerGap === Infinity ? Number.MAX_SAFE_INTEGER : a.costPerGap;
+      const bCost = b.costPerGap === Infinity ? Number.MAX_SAFE_INTEGER : b.costPerGap;
+      if (aCost !== bCost) return aCost - bCost;
+      if (b.gapsClosed !== a.gapsClosed) return b.gapsClosed - a.gapsClosed;
+      return a.change.costDelta - b.change.costDelta;
+    });
 }
 
 // ---------------------------------------------------------------------------
