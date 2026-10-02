@@ -44,9 +44,9 @@ import {
 import { oneSwap, proofReceipt, shockPrices } from "@/lib/platefix/proof";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
+import { LoadingScreen } from "@/components/LoadingScreen";
 import {
   AlertTriangle,
-  CookingPot,
   Link2,
   LogOut,
   Save,
@@ -385,11 +385,7 @@ export default function Dashboard() {
   };
 
   if (!state || !household) {
-    return (
-      <main className="flex min-h-screen items-center justify-center">
-        <CookingPot className="size-6 animate-pulse text-muted-foreground" />
-      </main>
-    );
+    return <LoadingScreen label="setting the table…" />;
   }
 
   const symbol = currencySymbol(household.currency);

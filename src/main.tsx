@@ -1,5 +1,6 @@
 import '@vly-ai/integrations';
 import { Toaster } from "@/components/ui/sonner";
+import { LoadingScreen } from "@/components/LoadingScreen";
 import { RequireAuth } from "@/components/RequireAuth";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
@@ -15,13 +16,9 @@ const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
-// Simple loading fallback for route transitions
+// Route-level loading: the immersive branded screen while lazy chunks arrive.
 function RouteLoading() {
-  return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="animate-pulse text-muted-foreground">Loading...</div>
-    </div>
-  );
+  return <LoadingScreen />;
 }
 
 /** Silent error boundary — if VlyToolbar crashes it renders nothing instead of
@@ -82,6 +79,20 @@ class RootErrorBoundary extends React.Component<
 
 const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
 
+/** Fades out and removes the first-paint boot overlay (index.html) once
+ *  React has actually mounted. Runs first in the tree so the overlay never
+ *  outlives the app — even if the root later renders an error boundary. */
+function DismissBoot() {
+  useEffect(() => {
+    const boot = document.getElementById("boot");
+    if (!boot) return;
+    boot.classList.add("boot-fade");
+    const t = setTimeout(() => boot.remove(), 500);
+    return () => clearTimeout(t);
+  }, []);
+  return null;
+}
+
 
 
 function RouteSyncer() {
@@ -110,6 +121,7 @@ function RouteSyncer() {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
+    <DismissBoot />
     <RootErrorBoundary>
       <ToolbarErrorBoundary>
         <VlyToolbar />
