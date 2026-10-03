@@ -6,10 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:vercel": "tsc -b && vite build --outDir dist",
     "lint": "eslint .",
     "test": "bun test src/lib/platefix",
     "format": "prettier --write .",
     "preview": "vite preview"
+  },
+  "vercel": {
+    "framework": "vite",
+    "rewrites": [{ "source": "/(.*)", "destination": "/" }]
   },
   "dependencies": {
     "@convex-dev/auth": "^0.0.90",

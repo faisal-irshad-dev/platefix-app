@@ -4,9 +4,27 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 import { defineConfig } from "vite";
 
+// Vly's integrations plugin is used by the Freebuff preview host. It is
+// bundled in this project's devDependencies and available here, but a direct
+// deploy (Vercel, …) does not need it. We still call it when available so the
+// local Freebuff workflow is untouched; if the module is missing or throws at
+// config-time it is treated as a no-op rather than breaking the build.
+//
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function maybeVlyPlugin(): any {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-require-imports
+    const { vlyPlugin } = require("@vly-ai/integrations");
+    if (typeof vlyPlugin === "function") return vlyPlugin();
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), vlyPlugin(), tailwindcss()],
+  plugins: [react(), maybeVlyPlugin(), tailwindcss()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

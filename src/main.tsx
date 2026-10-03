@@ -10,6 +10,19 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 
+// ---- Vly-provided integrations are for the Freebuff preview host only. ----
+// On a standalone deploy (Vercel, Netlify, …) these env vars are absent and
+// the toolbar overlay is unavailable. The app still works fully there: Convex
+// Auth, the dashboard, the browser-side solver, and data persistence.
+//
+// VlyToolbar is kept in the tree unconditionally because the file is bundled
+// and the component itself gates all of its behaviour behind runtime host
+// checks (it only activates on the Freebuff preview host). When those checks
+// fail it renders a no-op, so nothing crashes on a direct deploy.
+const VLY_INTEGRATIONS_ENABLED =
+  !!import.meta.env.VITE_VLY_APP_ID &&
+  !!import.meta.env.VITE_VLY_MONITORING_URL;
+
 // Lazy load route components for better code splitting
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
@@ -77,7 +90,18 @@ class RootErrorBoundary extends React.Component<
   }
 }
 
-const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
+// ---- Convex backend endpoint. ----
+// Required for this app to function (auth + household persistence). On Vercel
+// (or any standalone deploy) set VITE_CONVEX_URL to your deployed Convex URL
+// in the project's environment variables (see README · Deployment).
+const convexUrl =
+  (import.meta.env.VITE_CONVEX_URL as string) ?? "";
+if (import.meta.env.PROD && !convexUrl) {
+  console.error(
+    "[PlateFix] VITE_CONVEX_URL is not set. The dashboard and auth will not work on this deploy.",
+  );
+}
+const convex = new ConvexReactClient(convexUrl);
 
 /** Fades out and removes the first-paint boot overlay (index.html) once
  *  React has actually mounted. Runs first in the tree so the overlay never
@@ -97,11 +121,20 @@ function DismissBoot() {
 
 function RouteSyncer() {
   const location = useLocation();
+
   useEffect(() => {
-    window.parent.postMessage(
-      { type: "iframe-route-change", path: location.pathname },
-      "*",
-    );
+    // Only talk to a parent frame when we are actually embedded (Freebuff
+    // preview). On a straight Vercel deploy window.parent === window, so
+    // this is a no-op and never throws.
+    try {
+      if (window.parent === window) return;
+      window.parent.postMessage(
+        { type: "iframe-route-change", path: location.pathname },
+        "*",
+      );
+    } catch {
+      // Cross-origin restriction on the parent: not our problem.
+    }
   }, [location.pathname]);
 
   useEffect(() => {
@@ -117,7 +150,6 @@ function RouteSyncer() {
 
   return null;
 }
-
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

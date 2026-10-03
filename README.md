@@ -127,6 +127,82 @@ bun tsc -b --noEmit  # typecheck
 Sign-in is email OTP or one-click guest (Convex Auth) — the dashboard route is
 protected.
 
+---
+
+## Deployment to Vercel (one-click)
+
+This project is configured for **one-click deployment to Vercel**.
+The frontend (React + Vite SPA) deploys to Vercel; the Convex backend
+deploys separately to Convex.
+
+### Step 1 — Deploy the Convex backend (required, one time)
+
+The Convex functions under `src/convex/` do **not** deploy to Vercel.
+Deploy them to your own Convex project:
+
+1. Install the Convex CLI: `npm install -g convex` (or use `npx`).
+2. Run `convex dev --once` locally to push your schema and functions to a
+   new or existing Convex project.
+3. Copy the **Deployment URL** from the Convex dashboard
+   (looks like `https://<deployment>.convex.cloud`).
+
+Alternatively, connect your GitHub repo to Convex in the Convex dashboard
+for automatic deployments on every push.
+
+### Step 2 — Deploy the frontend to Vercel
+
+1. Push this repo to GitHub.
+2. In the Vercel dashboard, click **Add New → Project** and select your repo.
+3. Vercel auto-detects the Vite framework from `vercel.json` and `package.json`.
+4. Configure the **Environment Variables** (see below).
+5. Click **Deploy**.
+
+### Required environment variables (Vercel project settings)
+
+| Variable | Value | Notes |
+| --- | --- | --- |
+| `VITE_CONVEX_URL` | Your Convex deployment URL | e.g. `https://<deployment>.convex.cloud` |
+| `VITE_VLY_APP_ID` | *(optional)* | Only needed if you want Vly toolbar/integration features |
+| `VITE_VLY_MONITORING_URL` | *(optional)* | Only needed if you want Vly error monitoring |
+
+> **Important:** Vercel environment variables with the `VITE_` prefix are
+> embedded at build time. If you change them, redeploy.
+
+### How the code adapts to Vercel
+
+- `vite.config.ts` already guards the `@vly-ai/integrations` plugin so a
+  direct Vercel deploy (which has no Vly tooling) builds cleanly.
+- `src/main.tsx` guards `VITE_VLY_*` env vars; on Vercel those are absent
+  and the toolbar/monitoring become no-ops.
+- `vly-toolbar-readonly.tsx` checks `window.location.hostname` and only
+  activates on the Freebuff preview host.
+- `src/instrumentation.tsx` only fires when `VITE_VLY_APP_ID` and
+  `VITE_VLY_MONITORING_URL` are both set.
+- The app is a standard client-side React Router SPA. `vercel.json` rewrites
+  all paths to `/` so refreshes and direct links to `/dashboard` never 404.
+
+### What does NOT live on Vercel
+
+- **Convex backend** (`src/convex/`) — deploy to Convex separately.
+- **Convex Auth** — runs inside your Convex deployment; the frontend just
+  points at it via `VITE_CONVEX_URL`.
+
+### Local testing of the Vercel build
+
+```bash
+bun run build:vercel   # produces dist/ identical to what Vercel builds
+bunx serve dist        # preview the static output locally on :3000
+```
+
+### Troubleshooting
+
+- **Blank page after deploy:** check the browser console for
+  `VITE_CONVEX_URL is not set` — set the environment variable and redeploy.
+- **404 on refresh:** verify `vercel.json` rewrites are present (they are
+  committed in this repo).
+- **Auth not working:** confirm the Convex deployment is live and
+  `VITE_CONVEX_URL` matches it exactly.
+
 ## Data hygiene (PRD §9 rule)
 
 No nutrient value, requirement, or price is typed from memory into app logic.
