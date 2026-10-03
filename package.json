@@ -12,10 +12,6 @@
     "format": "prettier --write .",
     "preview": "vite preview"
   },
-  "vercel": {
-    "framework": "vite",
-    "rewrites": [{ "source": "/(.*)", "destination": "/" }]
-  },
   "dependencies": {
     "@convex-dev/auth": "^0.0.90",
     "@hookform/resolvers": "^5.2.2",
