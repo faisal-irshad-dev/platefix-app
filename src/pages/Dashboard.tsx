@@ -42,7 +42,6 @@ import {
   spendTouchingNoGaps,
 } from "@/lib/platefix/engine";
 import { oneSwap, proofReceipt, shockPrices } from "@/lib/platefix/proof";
-import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import {
@@ -58,7 +57,6 @@ import { Slider } from "@/components/ui/slider";
 import { motion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { useMutation, useQuery } from "convex/react";
 import logo from "@/assets/logo.svg";
 
 const currencySymbol = (c: string) => (c === "INR" ? "₹" : c === "USD" ? "$" : c === "EUR" ? "€" : c);
@@ -170,17 +168,10 @@ export default function Dashboard() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
 
-  // Saved state from Convex (reactive). Null until loaded.
-  const saved = useQuery(api.households.getMy);
-  const saveHousehold = useMutation(api.households.save);
-
   const [state, setState] = useState<BuilderState | null>(null);
-  const hydratedRef = useRef(false);
 
-  // Hydrate once: saved doc if present, else the starting household.
+  // Hydrate once: load from localStorage (shared link takes priority).
   useEffect(() => {
-    if (saved === undefined || hydratedRef.current) return;
-    hydratedRef.current = true;
     // A shared link loads the sender's household without any sign-in step.
     if (window.location.hash.startsWith("#h=")) {
       const shared = decodeSharedHousehold(window.location.hash.slice(3));
@@ -190,33 +181,26 @@ export default function Dashboard() {
         return;
       }
     }
-    if (saved) {
-      setState({
-        name: saved.data.name,
-        currency: saved.data.currency,
-        dailyBudget: saved.data.dailyBudget,
-        members: saved.data.members as HouseholdMemberProfile[],
-        pot: saved.data.pot,
-        prices: saved.data.prices as PriceEntry[],
-      });
-    } else {
-      // Try the local draft first (covers anonymous/guest sessions), else default.
-      try {
-        const draft = localStorage.getItem(LOCAL_STORAGE_KEY);
-        setState(draft ? (JSON.parse(draft) as BuilderState) : startingState());
-      } catch {
-        setState(startingState());
-      }
+    // Try the local draft first, else default.
+    try {
+      const draft = localStorage.getItem(LOCAL_STORAGE_KEY);
+      setState(draft ? (JSON.parse(draft) as BuilderState) : startingState());
+    } catch {
+      setState(startingState());
     }
-  }, [saved]);
+  }, []);
 
   const [saveError, setSaveError] = useState(false);
   const lastSavedRef = useRef<string>("");
 
-  // Persist every change (debounced 600ms). Local draft always mirrors state.
+  // Persist every change (debounced 600ms) to localStorage.
   useEffect(() => {
     if (!state) return;
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
+    try {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
+    } catch {
+      // localStorage unavailable — nothing to save
+    }
     const t = setTimeout(() => {
       const payload = JSON.stringify({
         name: state.name,
@@ -228,12 +212,10 @@ export default function Dashboard() {
       });
       if (payload === lastSavedRef.current) return;
       lastSavedRef.current = payload;
-      saveHousehold({ data: JSON.parse(payload) })
-        .then(() => setSaveError(false))
-        .catch(() => setSaveError(true));
+      setSaveError(false);
     }, 600);
     return () => clearTimeout(t);
-  }, [state, saveHousehold]);
+  }, [state]);
 
   const patch = (p: Partial<BuilderState>) => setState((s) => (s ? { ...s, ...p } : s));
 
@@ -379,8 +361,9 @@ export default function Dashboard() {
     setView("today");
   };
 
-  const handleSignOut = async () => {
-    await signOut();
+  const handleSignOut = () => {
+    signOut();
+    setState(null);
     navigate("/");
   };
 
@@ -416,11 +399,11 @@ export default function Dashboard() {
           </button>
           <div className="flex items-center gap-2">
             <span className="hidden max-w-[180px] truncate text-sm text-muted-foreground sm:block">
-              {user?.name ?? user?.email ?? ""}
+              Guest mode
             </span>
             <Button type="button" variant="ghost" size="sm" className="gap-2" onClick={handleSignOut}>
               <LogOut className="size-4" />
-              Sign out
+              Reset
             </Button>
           </div>
         </div>

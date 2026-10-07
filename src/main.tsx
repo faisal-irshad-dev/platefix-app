@@ -3,8 +3,6 @@ import { Toaster } from "@/components/ui/sonner";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { RequireAuth } from "@/components/RequireAuth";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
-import { ConvexAuthProvider } from "@convex-dev/auth/react";
-import { ConvexReactClient } from "convex/react";
 import React, { StrictMode, useEffect, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
@@ -12,8 +10,7 @@ import "./index.css";
 
 // ---- Vly-provided integrations are for the Freebuff preview host only. ----
 // On a standalone deploy (Vercel, Netlify, …) these env vars are absent and
-// the toolbar overlay is unavailable. The app still works fully there: Convex
-// Auth, the dashboard, the browser-side solver, and data persistence.
+// the toolbar overlay is unavailable. The app still works fully there.
 //
 // VlyToolbar is kept in the tree unconditionally because the file is bundled
 // and the component itself gates all of its behaviour behind runtime host
@@ -90,19 +87,6 @@ class RootErrorBoundary extends React.Component<
   }
 }
 
-// ---- Convex backend endpoint. ----
-// Required for this app to function (auth + household persistence). On Vercel
-// (or any standalone deploy) set VITE_CONVEX_URL to your deployed Convex URL
-// in the project's environment variables (see README · Deployment).
-const convexUrl =
-  (import.meta.env.VITE_CONVEX_URL as string) ?? "";
-if (import.meta.env.PROD && !convexUrl) {
-  console.error(
-    "[PlateFix] VITE_CONVEX_URL is not set. The dashboard and auth will not work on this deploy.",
-  );
-}
-const convex = new ConvexReactClient(convexUrl);
-
 /** Fades out and removes the first-paint boot overlay (index.html) once
  *  React has actually mounted. Runs first in the tree so the overlay never
  *  outlives the app — even if the root later renders an error boundary. */
@@ -158,30 +142,28 @@ createRoot(document.getElementById("root")!).render(
       <ToolbarErrorBoundary>
         <VlyToolbar />
       </ToolbarErrorBoundary>
-      <ConvexAuthProvider client={convex}>
-        <BrowserRouter>
-          <RouteSyncer />
-          <Suspense fallback={<RouteLoading />}>
-            <Routes>
-              <Route path="/" element={<Landing />} />
-              <Route
-                path="/auth"
-                element={<AuthPage redirectAfterAuth="/dashboard" />}
-              />
-              <Route
-                path="/dashboard"
-                element={
-                  <RequireAuth>
-                    <Dashboard />
-                  </RequireAuth>
-                }
-              />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </Suspense>
-        </BrowserRouter>
+      <BrowserRouter>
+        <RouteSyncer />
+        <Suspense fallback={<RouteLoading />}>
+          <Routes>
+            <Route path="/" element={<Landing />} />
+            <Route
+              path="/auth"
+              element={<AuthPage redirectAfterAuth="/dashboard" />}
+            />
+            <Route
+              path="/dashboard"
+              element={
+                <RequireAuth>
+                  <Dashboard />
+                </RequireAuth>
+              }
+            />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
         <Toaster />
-      </ConvexAuthProvider>
+      </BrowserRouter>
     </RootErrorBoundary>
   </StrictMode>,
 );
